@@ -645,7 +645,9 @@ function renderScatter() {
   const trace = {
     x: filtered.map(d => d[xKey]), y: filtered.map(d => d[yKey]),
     text: filtered.map(d => `${d.name} (#${d.rank})<br>Overall: ${d.overall.toFixed(2)}<br>${xMeta.label}: ${xMeta.fmt(d[xKey])}<br>${yMeta.label}: ${yMeta.fmt(d[yKey])}`),
-    hoverinfo: 'text', mode: 'markers',
+    hoverinfo: 'text', mode: 'markers+text',
+    textposition: 'top center', textfont: { size: 9, color: '#8a8d9a' },
+    texttemplate: filtered.map(d => d.name),
     marker: {
       size: 9, color: filtered.map(d => d[cKey]),
       colorscale: cMeta.lower_is_good ? [[0,'#4caf82'],[0.5,'#e0c040'],[1,'#e05555']] : [[0,'#e05555'],[0.5,'#e0c040'],[1,'#4caf82']],
