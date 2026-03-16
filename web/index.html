@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>光環境安定性マップ - 全天日射量 / 日照時間メトリクス</title>
+<script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<style>
+:root {
+  --bg: #0f1117;
+  --surface: #1a1d27;
+  --border: #2a2d3a;
+  --text: #e0e0e6;
+  --text-dim: #8a8d9a;
+  --accent: #6c9cff;
+  --good: #4caf82;
+  --bad: #e05555;
+}
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
+  background: var(--bg);
+  color: var(--text);
+  line-height: 1.5;
+}
+.container { max-width: 1400px; margin: 0 auto; padding: 0 20px; }
+header {
+  padding: 32px 0 16px;
+  border-bottom: 1px solid var(--border);
+  margin-bottom: 24px;
+}
+header h1 { font-size: 1.5rem; font-weight: 600; }
+header p { color: var(--text-dim); font-size: 0.9rem; margin-top: 4px; }
+
+.source-switcher { display: flex; gap: 4px; margin-bottom: 16px; }
+.source-btn {
+  padding: 8px 18px; background: var(--surface); border: 1px solid var(--border);
+  color: var(--text-dim); cursor: pointer; font-size: 0.85rem; border-radius: 6px; transition: all 0.2s;
+}
+.source-btn:hover { color: var(--text); border-color: var(--text-dim); }
+.source-btn.active { color: var(--bg); background: var(--accent); border-color: var(--accent); font-weight: 600; }
+.source-note { font-size: 0.8rem; color: var(--text-dim); margin-left: 12px; align-self: center; }
+
+.tabs { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
+.tab {
+  padding: 10px 20px; background: none; border: none; color: var(--text-dim);
+  cursor: pointer; font-size: 0.9rem; border-bottom: 2px solid transparent; transition: all 0.2s;
+}
+.tab:hover { color: var(--text); }
+.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.panel { display: none; }
+.panel.active { display: block; }
+
+#map { height: 500px; border-radius: 8px; border: 1px solid var(--border); }
+.map-controls { display: flex; gap: 12px; margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
+.map-controls label, .scatter-controls label { color: var(--text-dim); font-size: 0.85rem; }
+.map-controls select, .scatter-controls select {
+  background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  padding: 6px 10px; border-radius: 6px; font-size: 0.85rem;
+}
+
+.scatter-controls { display: flex; gap: 16px; margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
+#scatter-plot { height: 560px; }
+
+.table-wrapper { overflow-x: auto; }
+table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
+th, td { padding: 8px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border); }
+th {
+  position: sticky; top: 0; background: var(--surface); color: var(--text-dim);
+  cursor: pointer; user-select: none; font-weight: 500;
+}
+th:hover { color: var(--accent); }
+th.sorted-asc::after { content: ' \u25B2'; font-size: 0.7em; }
+th.sorted-desc::after { content: ' \u25BC'; font-size: 0.7em; }
+td:nth-child(2), th:nth-child(2) { text-align: left; }
+tr:hover td { background: rgba(108, 156, 255, 0.06); }
+.rank-cell { font-weight: 600; }
+.score-good { color: var(--good); }
+.score-bad { color: var(--bad); }
+
+.info-grid {
+  display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+  gap: 12px; margin-bottom: 24px;
+}
+.info-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
+.info-card h3 { font-size: 0.8rem; color: var(--text-dim); font-weight: 400; margin-bottom: 4px; }
+.info-card .value { font-size: 1.4rem; font-weight: 600; }
+
+footer {
+  margin-top: 40px; padding: 20px 0; border-top: 1px solid var(--border);
+  color: var(--text-dim); font-size: 0.8rem; text-align: center;
+}
+footer a { color: var(--accent); text-decoration: none; }
+
+.note-box {
+  background: var(--surface); border: 1px solid var(--border); border-left: 3px solid #e0a030;
+  border-radius: 4px; padding: 12px 16px; margin-bottom: 20px; font-size: 0.85rem; color: var(--text-dim);
+}
+
+/* Weight panel */
+.weight-panel {
+  margin-top: 16px; background: var(--surface); border: 1px solid var(--border);
+  border-radius: 8px; padding: 16px;
+}
+.weight-panel-header {
+  display: flex; justify-content: space-between; align-items: center;
+  cursor: pointer; user-select: none;
+}
+.weight-panel-header h3 { font-size: 0.9rem; font-weight: 500; }
+.weight-panel-header .toggle { color: var(--text-dim); font-size: 0.8rem; }
+.weight-panel-body { margin-top: 12px; }
+.weight-panel-body.collapsed { display: none; }
+
+.weight-grid {
+  display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px;
+}
+@media (max-width: 768px) { .weight-grid { grid-template-columns: 1fr; } }
+
+.weight-row {
+  display: grid; grid-template-columns: 130px 1fr 48px; gap: 8px; align-items: center;
+}
+.weight-row label { font-size: 0.8rem; color: var(--text-dim); }
+.weight-row input[type=range] {
+  width: 100%; height: 4px; -webkit-appearance: none; appearance: none;
+  background: var(--border); border-radius: 2px; outline: none;
+}
+.weight-row input[type=range]::-webkit-slider-thumb {
+  -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
+  background: var(--accent); cursor: pointer;
+}
+.weight-row .weight-val {
+  font-size: 0.8rem; font-family: 'SF Mono', 'Menlo', monospace;
+  text-align: right; color: var(--text); min-width: 42px;
+}
+.weight-val.positive { color: var(--bad); }
+.weight-val.negative { color: var(--good); }
+.weight-val.zero { color: var(--text-dim); }
+
+.weight-actions {
+  display: flex; gap: 8px; margin-top: 12px; align-items: center;
+}
+.weight-actions button {
+  padding: 5px 14px; background: var(--border); border: none; color: var(--text);
+  border-radius: 4px; cursor: pointer; font-size: 0.8rem;
+}
+.weight-actions button:hover { background: var(--text-dim); color: var(--bg); }
+
+.formula-preview {
+  margin-top: 12px; padding: 10px 14px; background: var(--bg); border-radius: 6px;
+  font-family: 'SF Mono', 'Menlo', monospace; font-size: 0.75rem;
+  color: var(--text-dim); overflow-x: auto; white-space: pre-wrap; line-height: 1.7;
+}
+.formula-preview .fw-pos { color: var(--bad); }
+.formula-preview .fw-neg { color: var(--good); }
+.formula-preview .fw-zero { color: #555; }
+</style>
+</head>
+<body>
+<div class="container">
+
+<header>
+  <h1>光環境安定性マップ</h1>
+  <p id="subtitle"></p>
+</header>
+
+<div class="source-switcher">
+  <button class="source-btn active" data-source="solar">全天日射量 (48地点)</button>
+  <button class="source-btn" data-source="sunshine">日照時間 (155地点)</button>
+  <span class="source-note" id="source-note"></span>
+</div>
+
+<div class="info-grid" id="summary-cards"></div>
+
+<!-- Weight sliders (global, above tabs) -->
+<div class="weight-panel">
+  <div class="weight-panel-header" id="weight-toggle">
+    <h3>Score Weights</h3>
+    <span class="toggle" id="weight-toggle-label">&#9660; open</span>
+  </div>
+  <div class="weight-panel-body collapsed" id="weight-body">
+    <div class="weight-grid" id="weight-grid"></div>
+    <div class="weight-actions">
+      <button id="weight-reset">Reset to default</button>
+      <button id="weight-zero">All zero</button>
+    </div>
+    <div class="formula-preview" id="formula-preview"></div>
+  </div>
+</div>
+
+<div class="tabs">
+  <button class="tab active" data-panel="panel-map">Map</button>
+  <button class="tab" data-panel="panel-scatter">Scatter</button>
+  <button class="tab" data-panel="panel-table">Ranking</button>
+  <button class="tab" data-panel="panel-about">About</button>
+</div>
+
+<!-- MAP PANEL -->
+<div id="panel-map" class="panel active">
+  <div class="map-controls">
+    <label>Color by:</label>
+    <select id="map-metric">
+      <option value="overall">Overall Score (low=good)</option>
+      <option value="stability">Stability Score</option>
+      <option value="transition">Transition Score</option>
+      <option value="amplitude">Amplitude (low=stable)</option>
+      <option value="winter_floor">Winter Floor (high=bright)</option>
+      <option value="mean_val" id="opt-mean-val">Mean (unit)</option>
+      <option value="ramp">Ramp (low=stable)</option>
+      <option value="spring_30d_gain">Spring 30d Gain (low=gentle)</option>
+      <option value="autumn_30d_drop">Autumn 30d Drop (low=gentle)</option>
+    </select>
+  </div>
+  <div id="map"></div>
+</div>
+
+<!-- SCATTER PANEL -->
+<div id="panel-scatter" class="panel">
+  <div class="scatter-controls">
+    <label>X:</label>
+    <select id="scatter-x"></select>
+    <label>Y:</label>
+    <select id="scatter-y"></select>
+    <label>Color:</label>
+    <select id="scatter-color"></select>
+  </div>
+  <div id="scatter-plot"></div>
+</div>
+
+<!-- TABLE PANEL -->
+<div id="panel-table" class="panel">
+  <div class="note-box">
+    Low overall_score = good (stable light, gentle transitions, bright winter). Click column headers to sort.
+  </div>
+  <div class="table-wrapper">
+    <table id="ranking-table">
+      <thead><tr id="table-header"></tr></thead>
+      <tbody id="table-body"></tbody>
+    </table>
+  </div>
+</div>
+
+<!-- ABOUT PANEL -->
+<div id="panel-about" class="panel">
+  <div style="max-width:720px;">
+    <h2 style="font-size:1.2rem;margin-bottom:16px;">About this project</h2>
+    <div class="note-box" style="border-left-color:var(--accent);">
+      <strong>Purpose:</strong> Bipolar disorder symptoms can be influenced by the light environment.
+      This project analyzes JMA (Japan Meteorological Agency) daily normal values to find locations with
+      <strong>stable</strong> light environments and <strong>gentle seasonal transitions</strong>,
+      potentially suitable for long-term residence.
+    </div>
+    <h3 style="font-size:1rem;margin:20px 0 8px;">Data Sources</h3>
+    <table style="font-size:0.82rem;margin-bottom:20px;">
+      <tr><th style="text-align:left;">Source</th><th style="text-align:left;">Description</th><th style="text-align:left;">Stations</th></tr>
+      <tr><td style="text-align:left;">全天日射量 (solar radiation)</td><td style="text-align:left;">Total solar energy, MJ/m&sup2;/day. Captures diffuse radiation through clouds.</td><td style="text-align:left;">48</td></tr>
+      <tr><td style="text-align:left;">日照時間 (sunshine hours)</td><td style="text-align:left;">Hours of direct sunshine, h/day. Binary threshold (120 W/m&sup2;).</td><td style="text-align:left;">155</td></tr>
+    </table>
+    <p style="color:var(--text-dim);font-size:0.85rem;margin-bottom:20px;">
+      Default is 全天日射量 (solar radiation) as it better represents the actual light environment.
+      日照時間 covers 3x more stations but is a binary threshold measure.
+    </p>
+    <h3 style="font-size:1rem;margin:20px 0 8px;">Metrics</h3>
+    <table style="font-size:0.82rem;margin-bottom:20px;">
+      <tr><th style="text-align:left;">Metric</th><th style="text-align:left;">Meaning</th><th style="text-align:left;">Good</th></tr>
+      <tr><td style="text-align:left;">mean_val</td><td style="text-align:left;">Annual average value</td><td style="text-align:left;">High</td></tr>
+      <tr><td style="text-align:left;">amplitude</td><td style="text-align:left;">(P95-P05)/mean of smoothed curve</td><td style="text-align:left;">Low</td></tr>
+      <tr><td style="text-align:left;">ramp</td><td style="text-align:left;">Avg daily change of smoothed</td><td style="text-align:left;">Low</td></tr>
+      <tr><td style="text-align:left;">winter_floor</td><td style="text-align:left;">Mean smoothed Dec15-Feb15</td><td style="text-align:left;">High</td></tr>
+      <tr><td style="text-align:left;">spring_30d_gain</td><td style="text-align:left;">Max 30-day increase</td><td style="text-align:left;">Low</td></tr>
+      <tr><td style="text-align:left;">autumn_30d_drop</td><td style="text-align:left;">Max 30-day decrease</td><td style="text-align:left;">Low</td></tr>
+      <tr><td style="text-align:left;">spring_rise_days</td><td style="text-align:left;">Days 25%->75% level</td><td style="text-align:left;">High</td></tr>
+      <tr><td style="text-align:left;">autumn_fall_days</td><td style="text-align:left;">Days 75%->25% level</td><td style="text-align:left;">High</td></tr>
+    </table>
+    <h3 style="font-size:1rem;margin:20px 0 8px;">Limitations</h3>
+    <ul style="color:var(--text-dim);font-size:0.85rem;padding-left:20px;">
+      <li>Only normals (平年値) used -- year-to-year variability not captured</li>
+      <li>No livability/population filter applied</li>
+      <li><code>autumn_30d_drop</code> has weak sunshine-solar correlation (r=0.127)</li>
+    </ul>
+    <h3 style="font-size:1rem;margin:20px 0 8px;">Data Source</h3>
+    <p style="color:var(--text-dim);font-size:0.85rem;">
+      Japan Meteorological Agency (気象庁) daily normals, crawled from
+      <a href="https://www.data.jma.go.jp/risk/obsdl/index.php" style="color:var(--accent);">過去の気象データ・ダウンロード</a>.
+    </p>
+  </div>
+</div>
+
+</div>
+
+<footer>
+  <div class="container">
+    Data: JMA 平年値 |
+    <a href="https://www.data.jma.go.jp/risk/obsdl/index.php">Source</a>
+  </div>
+</footer>
+
+<script>
+// ---- State ----
+let ALL_DATA = {};
+let DATA = [];
+let currentSource = 'solar';
+
+const SOURCE_META = {
+  solar:    { unit: 'MJ/m\u00B2/day', label: '全天日射量', meanLabel: 'Mean Solar Radiation' },
+  sunshine: { unit: 'h/day',     label: '日照時間',  meanLabel: 'Mean Sunshine Hours' },
+};
+
+// Weight config: key, label, default weight, description of what positive weight means
+const WEIGHT_FIELDS = [
+  { key: 'amplitude',        label: 'Amplitude',        defaultW:  1, desc: '+ = penalize large seasonal swing' },
+  { key: 'ramp',             label: 'Ramp',             defaultW:  1, desc: '+ = penalize fast daily change' },
+  { key: 'winter_floor',     label: 'Winter Floor',     defaultW: -1, desc: '- = reward bright winter' },
+  { key: 'mean_val',         label: 'Mean Value',       defaultW:  0, desc: '- = reward high annual average' },
+  { key: 'spring_30d_gain',  label: 'Spring 30d Gain',  defaultW:  1, desc: '+ = penalize sudden spring brightening' },
+  { key: 'autumn_30d_drop',  label: 'Autumn 30d Drop',  defaultW:  1, desc: '+ = penalize sudden autumn darkening' },
+  { key: 'spring_rise_days', label: 'Spring Rise Days', defaultW: -1, desc: '- = reward slow spring transition' },
+  { key: 'autumn_fall_days', label: 'Autumn Fall Days', defaultW: -1, desc: '- = reward slow autumn transition' },
+];
+
+let weights = {};
+WEIGHT_FIELDS.forEach(f => { weights[f.key] = f.defaultW; });
+
+// Z-score cache per source
+let zScoreCache = {};
+
+function getMetricMeta() {
+  const u = SOURCE_META[currentSource].unit;
+  return {
+    overall:         { label: 'Overall Score', lower_is_good: true, fmt: v => v.toFixed(2) },
+    stability:       { label: 'Stability Score', lower_is_good: true, fmt: v => v.toFixed(2) },
+    transition:      { label: 'Transition Score', lower_is_good: true, fmt: v => v.toFixed(2) },
+    mean_val:        { label: `Mean (${u})`, lower_is_good: false, fmt: v => v.toFixed(2) },
+    amplitude:       { label: 'Amplitude', lower_is_good: true, fmt: v => v.toFixed(3) },
+    ramp:            { label: 'Ramp', lower_is_good: true, fmt: v => v.toFixed(4) },
+    winter_floor:    { label: `Winter Floor (${u})`, lower_is_good: false, fmt: v => v.toFixed(2) },
+    summer_ceiling:  { label: `Summer Ceiling (${u})`, lower_is_good: false, fmt: v => v.toFixed(2) },
+    spring_30d_gain: { label: 'Spring 30d Gain', lower_is_good: true, fmt: v => v.toFixed(2) },
+    autumn_30d_drop: { label: 'Autumn 30d Drop', lower_is_good: true, fmt: v => v.toFixed(2) },
+    spring_rise_days:{ label: 'Spring Rise Days', lower_is_good: false, fmt: v => v.toFixed(0) },
+    autumn_fall_days:{ label: 'Autumn Fall Days', lower_is_good: false, fmt: v => v.toFixed(0) },
+  };
+}
+
+const TABLE_COLS = [
+  { key: 'rank', label: '#', fmt: v => v },
+  { key: 'name', label: 'Station', fmt: v => v },
+  { key: 'overall', label: 'Overall' },
+  { key: 'mean_val', label: 'Mean' },
+  { key: 'amplitude', label: 'Ampl.' },
+  { key: 'ramp', label: 'Ramp' },
+  { key: 'winter_floor', label: 'W.Floor' },
+  { key: 'spring_30d_gain', label: 'Spr.Gain' },
+  { key: 'autumn_30d_drop', label: 'Aut.Drop' },
+  { key: 'spring_rise_days', label: 'Spr.Days' },
+  { key: 'autumn_fall_days', label: 'Aut.Days' },
+  { key: 'lat', label: 'Lat', fmt: v => v ? v.toFixed(1) : '?' },
+];
+
+// ---- Z-score computation ----
+function computeZScores(data) {
+  const z = {};
+  WEIGHT_FIELDS.forEach(f => {
+    const vals = data.map(d => d[f.key]);
+    const mean = vals.reduce((a, b) => a + b, 0) / vals.length;
+    const std = Math.sqrt(vals.reduce((a, b) => a + (b - mean) ** 2, 0) / vals.length);
+    z[f.key] = vals.map(v => std > 0 ? (v - mean) / std : 0);
+  });
+  return z;
+}
+
+function applyWeights() {
+  const z = zScoreCache[currentSource];
+  if (!z) return;
+  DATA.forEach((d, i) => {
+    let score = 0;
+    WEIGHT_FIELDS.forEach(f => {
+      score += weights[f.key] * z[f.key][i];
+    });
+    d.overall = Math.round(score * 1000) / 1000;
+  });
+  // Recompute ranks
+  const sorted = [...DATA].map((d, i) => ({ d, i })).sort((a, b) => a.d.overall - b.d.overall);
+  sorted.forEach((item, rank) => { item.d.rank = rank + 1; });
+}
+
+// ---- Weight panel ----
+function buildWeightPanel() {
+  const grid = document.getElementById('weight-grid');
+  grid.innerHTML = '';
+  WEIGHT_FIELDS.forEach(f => {
+    const row = document.createElement('div');
+    row.className = 'weight-row';
+    row.title = f.desc;
+    row.innerHTML = `
+      <label>${f.label}</label>
+      <input type="range" min="-50" max="50" step="0.1" value="${weights[f.key]}" data-key="${f.key}">
+      <span class="weight-val" data-key="${f.key}">${fmtWeight(weights[f.key])}</span>
+    `;
+    grid.appendChild(row);
+  });
+
+  grid.querySelectorAll('input[type=range]').forEach(slider => {
+    slider.addEventListener('input', () => {
+      const key = slider.dataset.key;
+      const val = parseFloat(slider.value);
+      weights[key] = val;
+      const span = grid.querySelector(`.weight-val[data-key="${key}"]`);
+      span.textContent = fmtWeight(val);
+      span.className = 'weight-val ' + (val > 0 ? 'positive' : val < 0 ? 'negative' : 'zero');
+      onWeightsChanged();
+    });
+  });
+
+  // Set initial color classes
+  grid.querySelectorAll('.weight-val').forEach(span => {
+    const val = weights[span.dataset.key];
+    span.className = 'weight-val ' + (val > 0 ? 'positive' : val < 0 ? 'negative' : 'zero');
+  });
+
+  updateFormulaPreview();
+}
+
+function fmtWeight(v) {
+  const s = v.toFixed(1);
+  return v > 0 ? '+' + s : s;
+}
+
+function onWeightsChanged() {
+  applyWeights();
+  updateFormulaPreview();
+  renderSummary();
+  renderMap();
+  renderScatter();
+  renderTable();
+}
+
+function updateFormulaPreview() {
+  const parts = [];
+  WEIGHT_FIELDS.forEach((f, i) => {
+    const w = weights[f.key];
+    if (w === 0) {
+      parts.push(`<span class="fw-zero"> 0.0\u00B7z(${f.key})</span>`);
+      return;
+    }
+    const sign = w > 0 ? '+' : '';
+    const cls = w > 0 ? 'fw-pos' : 'fw-neg';
+    parts.push(`<span class="${cls}">${sign}${w.toFixed(1)}</span>\u00B7z(${f.key})`);
+  });
+  document.getElementById('formula-preview').innerHTML =
+    '<b>overall</b> = ' + parts.join('  ');
+}
+
+function setWeights(newWeights) {
+  WEIGHT_FIELDS.forEach(f => {
+    weights[f.key] = newWeights[f.key] !== undefined ? newWeights[f.key] : 0;
+  });
+  // Update sliders
+  document.querySelectorAll('#weight-grid input[type=range]').forEach(slider => {
+    slider.value = weights[slider.dataset.key];
+  });
+  document.querySelectorAll('#weight-grid .weight-val').forEach(span => {
+    const val = weights[span.dataset.key];
+    span.textContent = fmtWeight(val);
+    span.className = 'weight-val ' + (val > 0 ? 'positive' : val < 0 ? 'negative' : 'zero');
+  });
+  onWeightsChanged();
+}
+
+// Toggle
+document.getElementById('weight-toggle').addEventListener('click', () => {
+  const body = document.getElementById('weight-body');
+  const label = document.getElementById('weight-toggle-label');
+  body.classList.toggle('collapsed');
+  label.innerHTML = body.classList.contains('collapsed') ? '&#9660; open' : '&#9650; close';
+});
+
+// Reset / Zero
+document.getElementById('weight-reset').addEventListener('click', () => {
+  const dw = {};
+  WEIGHT_FIELDS.forEach(f => { dw[f.key] = f.defaultW; });
+  setWeights(dw);
+});
+document.getElementById('weight-zero').addEventListener('click', () => {
+  const zw = {};
+  WEIGHT_FIELDS.forEach(f => { zw[f.key] = 0; });
+  setWeights(zw);
+});
+
+// ---- Source switching ----
+document.querySelectorAll('.source-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const src = btn.dataset.source;
+    if (src === currentSource) return;
+    currentSource = src;
+    document.querySelectorAll('.source-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    DATA = ALL_DATA[currentSource];
+    applyWeights();
+    renderAll();
+  });
+});
+
+// ---- Tabs ----
+document.querySelectorAll('.tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    tab.classList.add('active');
+    document.getElementById(tab.dataset.panel).classList.add('active');
+    if (tab.dataset.panel === 'panel-scatter') resizeScatter();
+    if (tab.dataset.panel === 'panel-map') map.invalidateSize();
+  });
+});
+
+// ---- Render All ----
+function renderAll() {
+  const sm = SOURCE_META[currentSource];
+  document.getElementById('subtitle').textContent =
+    `${sm.label}平年値から算出した安定性・季節遷移メトリクス (${DATA.length}地点)`;
+  document.getElementById('source-note').textContent =
+    currentSource === 'solar'
+      ? 'Default: total radiation energy including diffuse light through clouds'
+      : 'Binary threshold measure (direct sunshine > 120 W/m\u00B2). 3x more stations.';
+  document.getElementById('opt-mean-val').textContent = `${sm.meanLabel} (${sm.unit})`;
+
+  renderSummary();
+  renderMap();
+  populateScatterSelects();
+  renderScatter();
+  renderTable();
+  updateFormulaPreview();
+}
+
+// ---- Summary Cards ----
+function renderSummary() {
+  const sm = SOURCE_META[currentSource];
+  const byScore = [...DATA].sort((a, b) => a.overall - b.overall);
+  const top = byScore[0];
+  const cards = [
+    { title: `${sm.label} / ${DATA.length} Stations`, value: DATA.length },
+    { title: 'Best Overall', value: `${top.name} (${top.overall.toFixed(2)})` },
+    { title: 'Lowest Amplitude', value: (() => { const s = [...DATA].sort((a,b) => a.amplitude - b.amplitude)[0]; return `${s.name} (${s.amplitude.toFixed(3)})`; })() },
+    { title: 'Highest Winter Floor', value: (() => { const s = [...DATA].sort((a,b) => b.winter_floor - a.winter_floor)[0]; return `${s.name} (${s.winter_floor.toFixed(1)})`; })() },
+  ];
+  document.getElementById('summary-cards').innerHTML = cards.map(c =>
+    `<div class="info-card"><h3>${c.title}</h3><div class="value">${c.value}</div></div>`
+  ).join('');
+}
+
+// ---- Map ----
+const map = L.map('map').setView([36.5, 138], 5);
+L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+  attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
+  maxZoom: 18,
+}).addTo(map);
+
+let mapMarkers = [];
+
+function colorScale(val, min, max, invert) {
+  let t = (val - min) / (max - min || 1);
+  if (invert) t = 1 - t;
+  const r = t < 0.5 ? Math.round(255 * t * 2) : 255;
+  const g = t < 0.5 ? 255 : Math.round(255 * (1 - (t - 0.5) * 2));
+  return `rgb(${r},${g},60)`;
+}
+
+function renderMap() {
+  const metric = document.getElementById('map-metric').value;
+  const METRIC_META = getMetricMeta();
+  const meta = METRIC_META[metric];
+  const sm = SOURCE_META[currentSource];
+  const filtered = DATA.filter(d => d.lat != null);
+  const vals = filtered.map(d => d[metric]);
+  const min = Math.min(...vals);
+  const max = Math.max(...vals);
+
+  mapMarkers.forEach(m => map.removeLayer(m));
+  mapMarkers = [];
+
+  filtered.forEach(d => {
+    const color = colorScale(d[metric], min, max, meta.lower_is_good);
+    const marker = L.circleMarker([d.lat, d.lon], {
+      radius: 7, fillColor: color, color: '#222', weight: 1, fillOpacity: 0.85,
+    }).addTo(map);
+
+    marker.bindPopup(`
+      <div style="font-size:13px;line-height:1.6;">
+        <strong>${d.name}</strong> (#${d.rank})<br>
+        Overall: <b>${d.overall.toFixed(2)}</b><br>
+        ${meta.label}: <b>${meta.fmt(d[metric])}</b><br>
+        Mean: ${d.mean_val.toFixed(2)} ${sm.unit}<br>
+        Amplitude: ${d.amplitude.toFixed(3)}<br>
+        Winter Floor: ${d.winter_floor.toFixed(2)} ${sm.unit}
+      </div>
+    `);
+    marker.bindTooltip(d.name, { permanent: false, direction: 'top', offset: [0, -8] });
+    mapMarkers.push(marker);
+  });
+}
+
+document.getElementById('map-metric').addEventListener('change', renderMap);
+
+// ---- Scatter ----
+let scatterInitialized = false;
+
+function populateScatterSelects() {
+  const METRIC_META = getMetricMeta();
+  const keys = Object.keys(METRIC_META);
+  const prevX = document.getElementById('scatter-x').value;
+  const prevY = document.getElementById('scatter-y').value;
+  const prevC = document.getElementById('scatter-color').value;
+
+  ['scatter-x', 'scatter-y', 'scatter-color'].forEach(id => {
+    const sel = document.getElementById(id);
+    sel.innerHTML = '';
+    keys.forEach(k => {
+      const opt = document.createElement('option');
+      opt.value = k; opt.textContent = METRIC_META[k].label;
+      sel.appendChild(opt);
+    });
+  });
+
+  document.getElementById('scatter-x').value = prevX || 'amplitude';
+  document.getElementById('scatter-y').value = prevY || 'winter_floor';
+  document.getElementById('scatter-color').value = prevC || 'overall';
+
+  if (!scatterInitialized) {
+    ['scatter-x', 'scatter-y', 'scatter-color'].forEach(id =>
+      document.getElementById(id).addEventListener('change', renderScatter)
+    );
+    scatterInitialized = true;
+  }
+}
+
+function renderScatter() {
+  const METRIC_META = getMetricMeta();
+  const xKey = document.getElementById('scatter-x').value;
+  const yKey = document.getElementById('scatter-y').value;
+  const cKey = document.getElementById('scatter-color').value;
+  const xMeta = METRIC_META[xKey], yMeta = METRIC_META[yKey], cMeta = METRIC_META[cKey];
+  const filtered = DATA.filter(d => d.lat != null);
+
+  const trace = {
+    x: filtered.map(d => d[xKey]), y: filtered.map(d => d[yKey]),
+    text: filtered.map(d => `${d.name} (#${d.rank})<br>Overall: ${d.overall.toFixed(2)}<br>${xMeta.label}: ${xMeta.fmt(d[xKey])}<br>${yMeta.label}: ${yMeta.fmt(d[yKey])}`),
+    hoverinfo: 'text', mode: 'markers',
+    marker: {
+      size: 9, color: filtered.map(d => d[cKey]),
+      colorscale: cMeta.lower_is_good ? [[0,'#4caf82'],[0.5,'#e0c040'],[1,'#e05555']] : [[0,'#e05555'],[0.5,'#e0c040'],[1,'#4caf82']],
+      colorbar: { title: cMeta.label, tickfont: { color: '#8a8d9a' }, titlefont: { color: '#8a8d9a' } },
+      line: { width: 0.5, color: '#333' },
+    },
+    type: 'scatter',
+  };
+  const layout = {
+    xaxis: { title: xMeta.label, color: '#8a8d9a', gridcolor: '#2a2d3a' },
+    yaxis: { title: yMeta.label, color: '#8a8d9a', gridcolor: '#2a2d3a' },
+    paper_bgcolor: '#0f1117', plot_bgcolor: '#0f1117',
+    font: { color: '#e0e0e6' }, margin: { l: 60, r: 20, t: 20, b: 50 }, hovermode: 'closest',
+  };
+  Plotly.newPlot('scatter-plot', [trace], layout, { responsive: true });
+}
+
+function resizeScatter() { Plotly.Plots.resize('scatter-plot'); }
+
+// ---- Table ----
+let sortCol = 'overall';
+let sortAsc = true;
+
+function renderTable() {
+  const METRIC_META = getMetricMeta();
+  const header = document.getElementById('table-header');
+  header.innerHTML = TABLE_COLS.map(c => {
+    let cls = '';
+    if (c.key === sortCol) cls = sortAsc ? 'sorted-asc' : 'sorted-desc';
+    return `<th class="${cls}" data-key="${c.key}">${c.label}</th>`;
+  }).join('');
+
+  header.querySelectorAll('th').forEach(th => {
+    th.addEventListener('click', () => {
+      const key = th.dataset.key;
+      if (sortCol === key) { sortAsc = !sortAsc; } else { sortCol = key; sortAsc = true; }
+      renderTable();
+    });
+  });
+
+  const sorted = [...DATA].sort((a, b) => {
+    let av = a[sortCol], bv = b[sortCol];
+    if (typeof av === 'string') return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
+    if (av == null) return 1; if (bv == null) return -1;
+    return sortAsc ? av - bv : bv - av;
+  });
+
+  document.getElementById('table-body').innerHTML = sorted.map(d => {
+    return '<tr>' + TABLE_COLS.map(c => {
+      let val = d[c.key];
+      if (c.fmt) val = c.fmt(val);
+      else if (typeof val === 'number') { const meta = METRIC_META[c.key]; val = meta ? meta.fmt(val) : val.toFixed(2); }
+      let cls = '';
+      if (c.key === 'rank') cls = 'rank-cell';
+      if (c.key === 'overall' && d.overall < -3) cls = 'score-good';
+      if (c.key === 'overall' && d.overall > 3) cls = 'score-bad';
+      return `<td class="${cls}">${val}</td>`;
+    }).join('') + '</tr>';
+  }).join('');
+}
+
+// ---- Init ----
+fetch('data.json')
+  .then(r => r.json())
+  .then(data => {
+    ALL_DATA = data;
+    // Precompute z-scores for both sources
+    ['solar', 'sunshine'].forEach(src => {
+      zScoreCache[src] = computeZScores(ALL_DATA[src]);
+    });
+    DATA = ALL_DATA[currentSource];
+    applyWeights();
+    buildWeightPanel();
+    renderAll();
+  });
+</script>
+</body>
+</html>
