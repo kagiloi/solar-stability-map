@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>光環境安定性マップ - 全天日射量 / 日照時間メトリクス</title>
+<title>光環境 分析ワークベンチ - 全天日射量 / 日照時間</title>
 <script src="https://cdn.plot.ly/plotly-2.35.0.min.js"></script>
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
@@ -11,6 +11,7 @@
 :root {
   --bg: #0f1117;
   --surface: #1a1d27;
+  --surface2: #161922;
   --border: #2a2d3a;
   --text: #e0e0e6;
   --text-dim: #8a8d9a;
@@ -19,353 +20,286 @@
   --bad: #e05555;
 }
 * { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; }
 body {
   font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-  background: var(--bg);
-  color: var(--text);
-  line-height: 1.5;
-}
-.container { max-width: 1400px; margin: 0 auto; padding: 0 20px; }
-header {
-  padding: 32px 0 16px;
-  border-bottom: 1px solid var(--border);
-  margin-bottom: 24px;
-}
-header h1 { font-size: 1.5rem; font-weight: 600; }
-header p { color: var(--text-dim); font-size: 0.9rem; margin-top: 4px; }
-
-.source-switcher { display: flex; gap: 4px; margin-bottom: 16px; }
-.source-btn {
-  padding: 8px 18px; background: var(--surface); border: 1px solid var(--border);
-  color: var(--text-dim); cursor: pointer; font-size: 0.85rem; border-radius: 6px; transition: all 0.2s;
-}
-.source-btn:hover { color: var(--text); border-color: var(--text-dim); }
-.source-btn.active { color: var(--bg); background: var(--accent); border-color: var(--accent); font-weight: 600; }
-.source-note { font-size: 0.8rem; color: var(--text-dim); margin-left: 12px; align-self: center; }
-
-.model-switcher { display: flex; gap: 4px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; }
-.model-switcher .label { font-size: 0.8rem; color: var(--text-dim); margin-right: 4px; }
-.model-btn {
-  padding: 8px 16px; background: var(--surface); border: 1px solid var(--border);
-  color: var(--text-dim); cursor: pointer; font-size: 0.85rem; border-radius: 6px; transition: all 0.2s;
-}
-.model-btn:hover { color: var(--text); border-color: var(--text-dim); }
-.model-btn.active { color: var(--bg); background: var(--good); border-color: var(--good); font-weight: 600; }
-.pareto-star { color: #e0c040; }
-.band-green { color: #4caf82; }
-.band-yellow { color: #e0c040; }
-.band-red { color: #e05555; font-weight: 600; }
-
-/* Help button + glossary modal */
-.help-btn {
-  background: var(--surface); border: 1px solid var(--border); color: var(--text);
-  cursor: pointer; border-radius: 6px; padding: 7px 14px; font-size: 0.85rem; transition: all 0.2s;
-}
-.help-btn:hover { border-color: var(--accent); color: var(--accent); }
-th[title] { cursor: help; }
-th[title]:hover { color: var(--accent); }
-.modal-overlay {
-  position: fixed; inset: 0; background: rgba(0,0,0,0.62); display: none;
-  align-items: flex-start; justify-content: center; z-index: 1000; padding: 40px 16px; overflow-y: auto;
-}
-.modal-overlay.open { display: flex; }
-.modal {
-  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
-  max-width: 920px; width: 100%; padding: 24px 28px 32px; position: relative;
-}
-.modal h2 { font-size: 1.25rem; margin-bottom: 10px; }
-.modal h3 { font-size: 0.95rem; margin: 20px 0 6px; color: var(--accent); }
-.modal table { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin-bottom: 6px; }
-.modal th, .modal td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: normal; vertical-align: top; }
-.modal th { color: var(--text-dim); font-weight: 500; position: static; background: none; }
-.modal td:first-child { white-space: nowrap; font-family: 'SF Mono','Menlo',monospace; color: var(--text); }
-.modal .note { color: var(--text-dim); font-size: 0.85rem; line-height: 1.7; }
-.modal code { background: var(--bg); padding: 1px 5px; border-radius: 4px; }
-.modal-close {
-  position: absolute; top: 12px; right: 16px; background: none; border: none;
-  color: var(--text-dim); font-size: 1.6rem; line-height: 1; cursor: pointer;
-}
-.modal-close:hover { color: var(--text); }
-
-.tabs { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
-.tab {
-  padding: 10px 20px; background: none; border: none; color: var(--text-dim);
-  cursor: pointer; font-size: 0.9rem; border-bottom: 2px solid transparent; transition: all 0.2s;
-}
-.tab:hover { color: var(--text); }
-.tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-.panel { display: none; }
-.panel.active { display: block; }
-
-#map { height: 500px; border-radius: 8px; border: 1px solid var(--border); }
-.map-controls { display: flex; gap: 12px; margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
-.map-controls label, .scatter-controls label { color: var(--text-dim); font-size: 0.85rem; }
-.map-controls select, .scatter-controls select {
-  background: var(--surface); color: var(--text); border: 1px solid var(--border);
-  padding: 6px 10px; border-radius: 6px; font-size: 0.85rem;
+  background: var(--bg); color: var(--text); line-height: 1.5;
+  display: flex; flex-direction: column; overflow: hidden;
 }
 
-.scatter-controls { display: flex; gap: 16px; margin-bottom: 12px; align-items: center; flex-wrap: wrap; }
-#scatter-plot { height: 560px; }
+/* ---------- Top bar (controls, hideable) ---------- */
+#topbar { flex: 0 0 auto; background: var(--surface2); border-bottom: 1px solid var(--border); }
+.topbar-strip {
+  display: flex; align-items: center; gap: 10px; padding: 8px 14px; flex-wrap: wrap;
+}
+.topbar-strip h1 { font-size: 1.05rem; font-weight: 600; margin-right: 6px; white-space: nowrap; }
+.topbar-strip h1 small { font-size: 0.72rem; color: var(--text-dim); font-weight: 400; }
+.spacer { flex: 1 1 auto; }
 
-.table-wrapper { overflow-x: auto; }
-table { width: 100%; border-collapse: collapse; font-size: 0.82rem; }
-th, td { padding: 8px 10px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border); }
-th {
-  position: sticky; top: 0; background: var(--surface); color: var(--text-dim);
-  cursor: pointer; user-select: none; font-weight: 500;
+.btn {
+  padding: 6px 12px; background: var(--surface); border: 1px solid var(--border);
+  color: var(--text-dim); cursor: pointer; font-size: 0.82rem; border-radius: 6px;
+  transition: all 0.15s; text-decoration: none; white-space: nowrap;
 }
-th:hover { color: var(--accent); }
-th.sorted-asc::after { content: ' \u25B2'; font-size: 0.7em; }
-th.sorted-desc::after { content: ' \u25BC'; font-size: 0.7em; }
-td:nth-child(2), th:nth-child(2) { text-align: left; }
-tr:hover td { background: rgba(108, 156, 255, 0.06); }
-.rank-cell { font-weight: 600; }
-.score-good { color: var(--good); }
-.score-bad { color: var(--bad); }
+.btn:hover { color: var(--text); border-color: var(--text-dim); }
+.btn.active { color: var(--bg); background: var(--accent); border-color: var(--accent); font-weight: 600; }
+.btn.good.active { background: var(--good); border-color: var(--good); }
+.btn-group { display: flex; gap: 3px; }
+.seg-label { font-size: 0.72rem; color: var(--text-dim); margin-right: 2px; }
 
-.info-grid {
-  display: grid; grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 12px; margin-bottom: 24px;
-}
-.info-card { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 16px; }
-.info-card h3 { font-size: 0.8rem; color: var(--text-dim); font-weight: 400; margin-bottom: 4px; }
-.info-card .value { font-size: 1.4rem; font-weight: 600; }
+#controls-body { padding: 4px 14px 12px; border-top: 1px solid var(--border); }
+#controls-body.collapsed { display: none; }
+.controls-note { font-size: 0.75rem; color: var(--text-dim); margin: 4px 0 8px; }
 
-footer {
-  margin-top: 40px; padding: 20px 0; border-top: 1px solid var(--border);
-  color: var(--text-dim); font-size: 0.8rem; text-align: center;
-}
-footer a { color: var(--accent); text-decoration: none; }
-
-.note-box {
-  background: var(--surface); border: 1px solid var(--border); border-left: 3px solid #e0a030;
-  border-radius: 4px; padding: 12px 16px; margin-bottom: 20px; font-size: 0.85rem; color: var(--text-dim);
-}
-
-/* Weight panel */
-.weight-panel {
-  margin-top: 16px; background: var(--surface); border: 1px solid var(--border);
-  border-radius: 8px; padding: 16px;
-}
-.weight-panel-header {
-  display: flex; justify-content: space-between; align-items: center;
-  cursor: pointer; user-select: none;
-}
-.weight-panel-header h3 { font-size: 0.9rem; font-weight: 500; }
-.weight-panel-header .toggle { color: var(--text-dim); font-size: 0.8rem; }
-.weight-panel-body { margin-top: 12px; }
-.weight-panel-body.collapsed { display: none; }
-
-.weight-grid {
-  display: grid; grid-template-columns: 1fr 1fr; gap: 8px 24px;
-}
-@media (max-width: 768px) { .weight-grid { grid-template-columns: 1fr; } }
-
-.weight-row {
-  display: grid; grid-template-columns: 130px 1fr 48px; gap: 8px; align-items: center;
-}
-.weight-row label { font-size: 0.8rem; color: var(--text-dim); }
+.weight-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 4px 22px; }
+.weight-row { display: grid; grid-template-columns: 116px 1fr 46px; gap: 6px; align-items: center; }
+.weight-row label { font-size: 0.76rem; color: var(--text-dim); }
 .weight-row input[type=range] {
   width: 100%; height: 4px; -webkit-appearance: none; appearance: none;
   background: var(--border); border-radius: 2px; outline: none;
 }
 .weight-row input[type=range]::-webkit-slider-thumb {
-  -webkit-appearance: none; width: 14px; height: 14px; border-radius: 50%;
-  background: var(--accent); cursor: pointer;
+  -webkit-appearance: none; width: 13px; height: 13px; border-radius: 50%; background: var(--accent); cursor: pointer;
 }
-.weight-row .weight-val {
-  font-size: 0.8rem; font-family: 'SF Mono', 'Menlo', monospace;
-  text-align: right; color: var(--text); min-width: 42px;
-}
+.weight-row .weight-val { font-size: 0.76rem; font-family: 'SF Mono','Menlo',monospace; text-align: right; color: var(--text); }
 .weight-val.positive { color: var(--bad); }
 .weight-val.negative { color: var(--good); }
 .weight-val.zero { color: var(--text-dim); }
-
-.weight-actions {
-  display: flex; gap: 8px; margin-top: 12px; align-items: center;
-}
-.weight-actions button {
-  padding: 5px 14px; background: var(--border); border: none; color: var(--text);
-  border-radius: 4px; cursor: pointer; font-size: 0.8rem;
-}
+.weight-actions { display: flex; gap: 8px; margin-top: 8px; align-items: center; flex-wrap: wrap; }
+.weight-actions button { padding: 4px 12px; background: var(--border); border: none; color: var(--text); border-radius: 4px; cursor: pointer; font-size: 0.76rem; }
 .weight-actions button:hover { background: var(--text-dim); color: var(--bg); }
-
 .formula-preview {
-  margin-top: 12px; padding: 10px 14px; background: var(--bg); border-radius: 6px;
-  font-family: 'SF Mono', 'Menlo', monospace; font-size: 0.75rem;
-  color: var(--text-dim); overflow-x: auto; white-space: pre-wrap; line-height: 1.7;
+  margin-top: 8px; padding: 8px 12px; background: var(--bg); border-radius: 6px;
+  font-family: 'SF Mono','Menlo',monospace; font-size: 0.72rem; color: var(--text-dim);
+  overflow-x: auto; white-space: pre-wrap; line-height: 1.6;
 }
 .formula-preview .fw-pos { color: var(--bad); }
 .formula-preview .fw-neg { color: var(--good); }
-.formula-preview .fw-zero { color: #555; }
+.formula-preview .fw-zero { color: #666; }
+
+/* ---------- Main row: map + right pane ---------- */
+#main { flex: 1 1 auto; display: flex; min-height: 0; position: relative; }
+#map { flex: 1 1 auto; min-width: 0; height: 100%; background: #0a0c10; }
+.map-overlay {
+  position: absolute; top: 10px; left: 56px; z-index: 500;
+  background: rgba(22,25,34,0.92); border: 1px solid var(--border); border-radius: 8px;
+  padding: 8px 10px; display: flex; align-items: center; gap: 8px; font-size: 0.8rem;
+}
+.map-overlay select {
+  background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  padding: 5px 8px; border-radius: 6px; font-size: 0.8rem;
+}
+.map-overlay label { color: var(--text-dim); }
+
+/* Right pane */
+#rightpane {
+  flex: 0 0 460px; width: 460px; background: var(--surface2); border-left: 1px solid var(--border);
+  display: flex; flex-direction: column; min-height: 0; transition: flex-basis 0.18s, width 0.18s;
+}
+#rightpane.collapsed { flex-basis: 0; width: 0; border-left: none; overflow: hidden; }
+.pane-tabs { display: flex; gap: 2px; padding: 8px 10px 0; border-bottom: 1px solid var(--border); flex: 0 0 auto; }
+.pane-tab {
+  padding: 8px 14px; background: none; border: none; color: var(--text-dim);
+  cursor: pointer; font-size: 0.84rem; border-bottom: 2px solid transparent;
+}
+.pane-tab:hover { color: var(--text); }
+.pane-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
+.pane-body { flex: 1 1 auto; overflow-y: auto; padding: 10px 12px; min-height: 0; }
+.pane-panel { display: none; }
+.pane-panel.active { display: block; }
+
+/* Pane toggle handle on the divider */
+#pane-toggle {
+  position: absolute; top: 50%; right: 460px; transform: translateY(-50%);
+  z-index: 600; background: var(--surface); border: 1px solid var(--border); border-right: none;
+  color: var(--text-dim); cursor: pointer; padding: 14px 5px; border-radius: 8px 0 0 8px;
+  font-size: 0.8rem; transition: right 0.18s;
+}
+#pane-toggle:hover { color: var(--accent); }
+#rightpane.collapsed + #pane-toggle, #main.pane-collapsed #pane-toggle { right: 0; }
+
+/* ---------- Scatter / Ranking ---------- */
+.pane-controls { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; flex-wrap: wrap; font-size: 0.78rem; }
+.pane-controls label { color: var(--text-dim); }
+.pane-controls select {
+  background: var(--surface); color: var(--text); border: 1px solid var(--border);
+  padding: 4px 6px; border-radius: 5px; font-size: 0.78rem; max-width: 150px;
+}
+#scatter-plot { height: 420px; }
+
+table.rank { width: 100%; border-collapse: collapse; font-size: 0.76rem; }
+table.rank th, table.rank td { padding: 5px 6px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border); }
+table.rank th {
+  position: sticky; top: 0; background: var(--surface2); color: var(--text-dim);
+  cursor: pointer; user-select: none; font-weight: 500; z-index: 2;
+}
+table.rank th:hover { color: var(--accent); }
+table.rank th[title] { cursor: help; }
+table.rank th.sorted-asc::after { content: ' ▲'; font-size: 0.7em; }
+table.rank th.sorted-desc::after { content: ' ▼'; font-size: 0.7em; }
+table.rank td.name, table.rank th.name { text-align: left; }
+table.rank tbody tr { cursor: pointer; }
+table.rank tbody tr:hover td { background: rgba(108,156,255,0.08); }
+table.rank tbody tr.selected td { background: rgba(108,156,255,0.10); }
+table.rank tbody tr.selected td.name { border-left: 3px solid var(--sel, var(--accent)); padding-left: 4px; font-weight: 600; }
+table.rank tbody tr.hovered td { background: rgba(224,200,64,0.12); }
+.pareto-star { color: #e0c040; }
+.band-green { color: #4caf82; } .band-yellow { color: #e0c040; } .band-red { color: #e05555; font-weight: 600; }
+.dot { display: inline-block; width: 9px; height: 9px; border-radius: 50%; margin-right: 4px; vertical-align: -1px; }
+
+/* ---------- Compare ---------- */
+.cmp-hint { color: var(--text-dim); font-size: 0.82rem; padding: 18px 6px; line-height: 1.8; }
+.cmp-section-title { font-size: 0.82rem; color: var(--accent); margin: 14px 0 4px; font-weight: 600; }
+.cmp-section-title:first-child { margin-top: 2px; }
+.cmp-sub { font-size: 0.72rem; color: var(--text-dim); margin-bottom: 4px; }
+.cmp-chart { height: 240px; }
+.cmp-chart.tall { height: 300px; }
+table.cmp { width: 100%; border-collapse: collapse; font-size: 0.74rem; }
+table.cmp th, table.cmp td { padding: 4px 6px; border-bottom: 1px solid var(--border); text-align: right; white-space: nowrap; }
+table.cmp th:first-child, table.cmp td:first-child { text-align: left; color: var(--text-dim); }
+table.cmp thead th { font-weight: 600; }
+.cmp-na { color: #555; }
+
+/* ---------- Selection tray ---------- */
+#seltray {
+  flex: 0 0 auto; background: var(--surface2); border-top: 1px solid var(--border);
+  display: flex; align-items: center; gap: 8px; padding: 7px 14px; min-height: 42px; flex-wrap: wrap;
+}
+#seltray .tray-label { font-size: 0.76rem; color: var(--text-dim); }
+.chip {
+  display: inline-flex; align-items: center; gap: 5px; background: var(--surface);
+  border: 1px solid var(--border); border-radius: 14px; padding: 3px 8px 3px 6px; font-size: 0.78rem;
+}
+.chip .chip-x { cursor: pointer; color: var(--text-dim); font-weight: 700; }
+.chip .chip-x:hover { color: var(--bad); }
+
+/* ---------- Modal (glossary) ---------- */
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.62); display: none;
+  align-items: flex-start; justify-content: center; z-index: 2000; padding: 40px 16px; overflow-y: auto;
+}
+.modal-overlay.open { display: flex; }
+.modal { background: var(--surface); border: 1px solid var(--border); border-radius: 10px; max-width: 920px; width: 100%; padding: 24px 28px 32px; position: relative; }
+.modal h2 { font-size: 1.25rem; margin-bottom: 10px; }
+.modal h3 { font-size: 0.95rem; margin: 20px 0 6px; color: var(--accent); }
+.modal table { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin-bottom: 6px; }
+.modal th, .modal td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: normal; vertical-align: top; }
+.modal th { color: var(--text-dim); font-weight: 500; }
+.modal td:first-child { white-space: nowrap; font-family: 'SF Mono','Menlo',monospace; color: var(--text); }
+.modal .note { color: var(--text-dim); font-size: 0.85rem; line-height: 1.7; }
+.modal code { background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+.modal-close { position: absolute; top: 12px; right: 16px; background: none; border: none; color: var(--text-dim); font-size: 1.6rem; line-height: 1; cursor: pointer; }
+.modal-close:hover { color: var(--text); }
+
+.leaflet-popup-content-wrapper, .leaflet-popup-tip { background: var(--surface); color: var(--text); }
 </style>
 </head>
 <body>
-<div class="container">
 
-<header>
-  <button class="help-btn" id="help-open" style="float:right;margin-top:4px;">❓ 指標の説明</button>
-  <h1>光環境安定性マップ</h1>
-  <p id="subtitle"></p>
-</header>
+<!-- ===================== TOP BAR ===================== -->
+<div id="topbar">
+  <div class="topbar-strip">
+    <h1>光環境 分析ワークベンチ <small id="subtitle"></small></h1>
 
-<div class="source-switcher">
-  <button class="source-btn active" data-source="solar">全天日射量 (48地点)</button>
-  <button class="source-btn" data-source="sunshine">日照時間 (155地点)</button>
-  <span class="source-note" id="source-note"></span>
-</div>
+    <span class="seg-label">データ源</span>
+    <div class="btn-group" id="source-group">
+      <button class="btn active" data-source="solar">全天日射量</button>
+      <button class="btn" data-source="sunshine">日照時間</button>
+    </div>
 
-<div class="info-grid" id="summary-cards"></div>
+    <span class="seg-label">モデル</span>
+    <div class="btn-group" id="model-group">
+      <button class="btn good active" data-model="v2">v2 非補償</button>
+      <button class="btn" data-model="v1">v1 線形</button>
+    </div>
 
-<!-- Scoring model switcher -->
-<div class="model-switcher">
-  <span class="label">Scoring model:</span>
-  <button class="model-btn active" data-model="v2">v2 · 非補償(飽和floor + Chebyshev)</button>
-  <button class="model-btn" data-model="v1">v1 · 線形 z 和</button>
-  <span class="source-note" id="model-note"></span>
-</div>
-
-<!-- Weight sliders (global, above tabs) -->
-<div class="weight-panel">
-  <div class="weight-panel-header" id="weight-toggle">
-    <h3 id="weight-panel-title">Score Weights</h3>
-    <span class="toggle" id="weight-toggle-label">&#9650; close</span>
+    <span class="spacer"></span>
+    <button class="btn" id="controls-toggle">▾ 重み調整</button>
+    <button class="btn" id="help-open">❓ 指標の説明</button>
+    <a class="btn" href="classic.html">📊 classic</a>
   </div>
-  <div class="weight-panel-body" id="weight-body">
+
+  <div id="controls-body" class="collapsed">
+    <div class="controls-note" id="controls-note"></div>
     <div class="weight-grid" id="weight-grid"></div>
     <div class="weight-actions">
-      <button id="weight-reset">Reset to default</button>
-      <button id="weight-zero">All zero</button>
+      <button id="weight-reset">既定に戻す</button>
+      <button id="weight-zero">全部ゼロ</button>
+      <span class="seg-label" id="source-note"></span>
     </div>
     <div class="formula-preview" id="formula-preview"></div>
   </div>
 </div>
 
-<div class="tabs">
-  <button class="tab active" data-panel="panel-map">Map</button>
-  <button class="tab" data-panel="panel-scatter">Scatter</button>
-  <button class="tab" data-panel="panel-table">Ranking</button>
-  <button class="tab" data-panel="panel-about">About</button>
-</div>
-
-<!-- MAP PANEL -->
-<div id="panel-map" class="panel active">
-  <div class="map-controls">
-    <label>Color by:</label>
-    <select id="map-metric">
-      <option value="overall">Active Score (low=good)</option>
-      <option value="winter_floor">Winter Floor (high=bright)</option>
-      <option value="total_variation">Total Variation Σ|Δ| (low=calm)</option>
-      <option value="excess_tv">Excess TV 非季節変動 (low=good)</option>
-      <option value="dark_spell">冬の連続曇天 [実日別] (low=good)</option>
-      <option value="winter_obs">冬の実日照h [実日別] (high=good)</option>
-      <option value="amplitude">Amplitude (low=stable)</option>
-      <option value="mean_val" id="opt-mean-val">Mean (unit)</option>
-      <option value="spring_30d_gain">Spring 30d Gain (low=gentle)</option>
-      <option value="autumn_30d_drop">Autumn 30d Drop (low=gentle)</option>
-      <option value="score_v2">score_v2 (生成時の既定重み)</option>
-      <option value="stability">v1 Stability Score</option>
-      <option value="transition">v1 Transition Score</option>
-    </select>
-  </div>
+<!-- ===================== MAIN ===================== -->
+<div id="main">
   <div id="map"></div>
-</div>
-
-<!-- SCATTER PANEL -->
-<div id="panel-scatter" class="panel">
-  <div class="scatter-controls">
-    <label>X:</label>
-    <select id="scatter-x"></select>
-    <label>Y:</label>
-    <select id="scatter-y"></select>
-    <label>Color:</label>
-    <select id="scatter-color"></select>
+  <div class="map-overlay">
+    <label>色:</label>
+    <select id="map-metric">
+      <option value="overall">スコア (低=良)</option>
+      <option value="winter_floor">冬の明るさ W.Floor (高=明)</option>
+      <option value="total_variation">総変動 Σ|Δ| (低=穏)</option>
+      <option value="excess_tv">梅雨/非季節 exTV (低=良)</option>
+      <option value="dark_spell">冬の連続曇天 [実日別] (低=良)</option>
+      <option value="winter_obs">冬の実日照h [実日別] (高=良)</option>
+      <option value="amplitude">年較差 Amplitude (低=安定)</option>
+      <option value="mean_val" id="opt-mean-val">Mean</option>
+      <option value="spring_30d_gain">春レート (低=緩)</option>
+      <option value="autumn_30d_drop">秋レート (低=緩)</option>
+      <option value="score_v2">score_v2 (既定重み固定)</option>
+    </select>
+    <span id="map-hint" style="color:var(--text-dim);font-size:0.74rem;">クリックで地点を選択(複数可)</span>
   </div>
-  <div id="scatter-plot"></div>
-</div>
 
-<!-- TABLE PANEL -->
-<div id="panel-table" class="panel">
-  <div class="note-box">
-    Score が低い = 良い。<span class="pareto-star">★</span> = この地点より「冬も明るく、<b>かつ</b>1年も穏やか」な所が他に1つも無い候補
-    （＝明るさ⇔穏やかさのトレードオフの最前線。★が付かない地点は「両方とも上回る別地点」があり選ぶ理由が薄い）。
-    列見出しに<b>マウスを乗せると各列の説明</b>、右上の<b>❓ボタンで全指標の解説</b>。重みは上のパネルで調整可。列見出しでソート。
-  </div>
-  <div class="table-wrapper">
-    <table id="ranking-table">
-      <thead><tr id="table-header"></tr></thead>
-      <tbody id="table-body"></tbody>
-    </table>
-  </div>
-</div>
-
-<!-- ABOUT PANEL -->
-<div id="panel-about" class="panel">
-  <div style="max-width:720px;">
-    <h2 style="font-size:1.2rem;margin-bottom:16px;">About this project</h2>
-    <div class="note-box" style="border-left-color:var(--accent);">
-      <strong>Purpose:</strong> Bipolar disorder symptoms can be influenced by the light environment.
-      This project analyzes JMA (Japan Meteorological Agency) daily normal values to find locations with
-      <strong>stable</strong> light environments and <strong>gentle seasonal transitions</strong>,
-      potentially suitable for long-term residence.
+  <!-- RIGHT PANE -->
+  <div id="rightpane">
+    <div class="pane-tabs">
+      <button class="pane-tab active" data-panel="pp-compare">Compare</button>
+      <button class="pane-tab" data-panel="pp-scatter">Scatter</button>
+      <button class="pane-tab" data-panel="pp-rank">Ranking</button>
     </div>
-    <h3 style="font-size:1rem;margin:20px 0 8px;">Data Sources</h3>
-    <table style="font-size:0.82rem;margin-bottom:20px;">
-      <tr><th style="text-align:left;">Source</th><th style="text-align:left;">Description</th><th style="text-align:left;">Stations</th></tr>
-      <tr><td style="text-align:left;">全天日射量 (solar radiation)</td><td style="text-align:left;">Total solar energy, MJ/m&sup2;/day. Captures diffuse radiation through clouds.</td><td style="text-align:left;">48</td></tr>
-      <tr><td style="text-align:left;">日照時間 (sunshine hours)</td><td style="text-align:left;">Hours of direct sunshine, h/day. Binary threshold (120 W/m&sup2;).</td><td style="text-align:left;">155</td></tr>
-    </table>
-    <p style="color:var(--text-dim);font-size:0.85rem;margin-bottom:20px;">
-      Default is 全天日射量 (solar radiation) as it better represents the actual light environment.
-      日照時間 covers 3x more stations but is a binary threshold measure.
-    </p>
-    <h3 style="font-size:1rem;margin:20px 0 8px;">Scoring models</h3>
-    <div class="note-box" style="border-left-color:var(--good);">
-      <strong>v2 (default) — 非補償・絶対基準</strong>: データ衛生（南極の昭和基地を除外）→ 各指標を固定アンカーで
-      desirability [0,1] に（z スコアをやめサンプル非依存に）→ augmented weighted Chebyshev
-      <code>score_v2 = max<sub>j</sub> w<sub>j</sub>(1−d<sub>j</sub>) + ρ·Σ</code> で集約（弱い軸が支配＝floor と delta を交換不可に）。
-      根拠: 春の日射<em>変化率</em>が双極I型の発症年齢と関連（Bauer ら多施設, PMID 28722128）／冬の光は
-      <em>飽和</em>するのでハード閾値でなく凹型ペナルティ（Zeitzer 2000, PMID 10922269）。詳細は
-      <code>docs/adr/004_phase2-scoring-v2.md</code>。<br>
-      <strong>v1 — 線形 z 和</strong>: 各指標 z スコアの重み付き和。補償型でサンプル依存。比較用に残置。
+    <div class="pane-body">
+      <!-- COMPARE -->
+      <div id="pp-compare" class="pane-panel active">
+        <div id="cmp-content"></div>
+      </div>
+      <!-- SCATTER -->
+      <div id="pp-scatter" class="pane-panel">
+        <div class="pane-controls">
+          <label>X:</label><select id="scatter-x"></select>
+          <label>Y:</label><select id="scatter-y"></select>
+          <label>色:</label><select id="scatter-color"></select>
+        </div>
+        <div id="scatter-plot"></div>
+        <p class="cmp-sub">点をクリックで選択。★=Pareto最適(冬明るさ×総変動の最前線)。</p>
+      </div>
+      <!-- RANKING -->
+      <div id="pp-rank" class="pane-panel">
+        <div class="pane-controls">
+          <label><input type="checkbox" id="rank-selonly"> 選択地点のみ</label>
+          <span class="cmp-sub" style="margin:0;">行クリックで選択 / 見出しでソート・説明</span>
+        </div>
+        <table class="rank" id="ranking-table">
+          <thead><tr id="table-header"></tr></thead>
+          <tbody id="table-body"></tbody>
+        </table>
+      </div>
     </div>
-    <h3 style="font-size:1rem;margin:20px 0 8px;">Metrics</h3>
-    <table style="font-size:0.82rem;margin-bottom:20px;">
-      <tr><th style="text-align:left;">Metric</th><th style="text-align:left;">Meaning</th><th style="text-align:left;">Good</th></tr>
-      <tr><td style="text-align:left;">winter_floor</td><td style="text-align:left;">Mean smoothed Dec15-Feb15 (うつ軸・飽和)</td><td style="text-align:left;">High</td></tr>
-      <tr><td style="text-align:left;">spring_30d_gain</td><td style="text-align:left;">Max 30-day increase (春の立ち上がりレート, Bauer)</td><td style="text-align:left;">Low</td></tr>
-      <tr><td style="text-align:left;">autumn_30d_drop</td><td style="text-align:left;">Max 30-day decrease (秋の落ち込みレート)</td><td style="text-align:left;">Low</td></tr>
-      <tr><td style="text-align:left;">total_variation</td><td style="text-align:left;">Σ|Δ| 年間の総変動 (≒ ramp×365)</td><td style="text-align:left;">Low</td></tr>
-      <tr><td style="text-align:left;">excess_tv</td><td style="text-align:left;">total_variation − 2·range = 非季節的な往復（梅雨/連続曇天など）。<strong>固定窓なし＝時期非依存</strong>（石垣の5月梅雨も東北の7月梅雨も、起きた時期に関係なく捕捉）</td><td style="text-align:left;">Low</td></tr>
-      <tr><td style="text-align:left;">amplitude</td><td style="text-align:left;">(P95-P05)/mean of smoothed curve</td><td style="text-align:left;">Low</td></tr>
-      <tr><td style="text-align:left;">mean_val</td><td style="text-align:left;">Annual average value</td><td style="text-align:left;">High</td></tr>
-    </table>
-    <div class="note-box" style="border-left-color:#e05555;">
-      <strong>冬の連続曇天 red-flag（overlay, スコア外）</strong>: 実観測の日別日照1991-2020から算出した
-      <code>dark_spell</code>＝悪い冬の最長連続曇天日数(CVaR80, 日照&lt;2h)。<span class="band-green">緑</span>≤5日 /
-      <span class="band-yellow">黄</span> / <span class="band-red">赤</span>≥10日。平年値もNASA衛星(~100km格子)も平均化で消す「連続曇天」を station 解像度で捉える。
-      <strong>スコアの重みには入れない</strong>（winter_floorと r=−0.88 で約77%重複＝二重計上を避け、red-flag表示に留める）。
-      赤＝日本海側・北海道西岸・冬曇りの南島(冬2-3h・最長2週間連続無日照)。詳細は <code>docs/experiments/2026-06-28_daily-volatility.md</code> / ADR 006。
-    </div>
-    <h3 style="font-size:1rem;margin:20px 0 8px;">Limitations</h3>
-    <ul style="color:var(--text-dim);font-size:0.85rem;padding-left:20px;">
-      <li>平年値 + 15日平滑のため <code>total_variation</code> は「実生活の変動」ではなく<strong>「季節傾き + 梅雨構造」</strong>。総観スケール（連続曇天）・年々変動は捕捉できない（真の変動には日別生データが必要）。</li>
-      <li>居住可能性フィルタ未適用（南鳥島・父島など無人島が上位に出る）。</li>
-      <li>重み・アンカー・k・ρ は判断レバー。感度分析は今後。</li>
-      <li><code>autumn_30d_drop</code> は sunshine-solar 相関が弱い (r=0.127)。</li>
-    </ul>
-    <h3 style="font-size:1rem;margin:20px 0 8px;">Data Source</h3>
-    <p style="color:var(--text-dim);font-size:0.85rem;">
-      Japan Meteorological Agency (気象庁) daily normals, crawled from
-      <a href="https://www.data.jma.go.jp/risk/obsdl/index.php" style="color:var(--accent);">過去の気象データ・ダウンロード</a>.
-    </p>
   </div>
+  <button id="pane-toggle" title="パネルを開閉">▶</button>
 </div>
 
+<!-- ===================== SELECTION TRAY ===================== -->
+<div id="seltray">
+  <span class="tray-label">選択地点:</span>
+  <span id="tray-chips"><span class="cmp-na" style="font-size:0.78rem;">なし — 地図/散布図/表でクリック</span></span>
+  <span class="spacer"></span>
+  <button class="btn" id="sel-demo" style="font-size:0.74rem;padding:3px 8px;">例: 松本/帯広/金沢を選択</button>
+  <button class="btn" id="sel-clear" style="font-size:0.74rem;padding:3px 8px;">クリア</button>
 </div>
 
-<!-- GLOSSARY MODAL -->
+<!-- ===================== GLOSSARY MODAL ===================== -->
 <div class="modal-overlay" id="help-modal">
   <div class="modal">
     <button class="modal-close" id="help-close" title="閉じる">&times;</button>
@@ -375,130 +309,121 @@ footer a { color: var(--accent); text-decoration: none; }
       <b>冬リスク・連続曇天・冬の実日照・当たり外れ</b>だけは<b>実観測の日別1991-2020</b>から。
       単位はソースで変わる(日照時間=<b>時間/日</b>, 全天日射=<b>MJ/m²/日</b>)。候補検討は松本/諏訪を含む<b>日照時間(155地点)</b>ソースで。
     </p>
-
+    <h3>使い方 (ワークベンチ)</h3>
+    <p class="note">
+      地図がベース。<b>地図のマーカー・散布図の点・ランキングの行のどれをクリックしても地点を選択</b>(複数可)。選択した地点は全ビューで同じ色でハイライトされ、
+      右の<b>Compare</b>タブに年周カーブ・太陽高度・冬の連続曇天・v2の5軸内訳が<b>重ねて</b>表示される。重みスライダー(上の「重み調整」)はリアルタイムで全体に反映。
+    </p>
     <h3>① 識別・ランク</h3>
     <table>
       <tr><th>列</th><th>意味</th></tr>
       <tr><td>#</td><td>現在のスコアでの順位(1=最良)</td></tr>
-      <tr><td>★</td><td><b>Pareto最適</b>: この地点より「冬も明るく、<b>かつ</b>1年も穏やか」な地点が他に1つも無い。明るさと穏やかさの<b>どちらかを諦めないとこれ以上良くできない</b>＝トレードオフの最前線。★が付かない地点は「両方とも上回る別地点」があるので選ぶ理由が薄い。<br>例: 帯広/釧路=穏やかさの端、熊谷/前橋=明るい冬の端、その間が★メニュー。
-        <br><b>※ ★なのに順位(Score)が下のことがある</b>: <b>★は2軸</b>(冬の明るさ × 年間変動)だけで判定、<b>順位は5軸</b>(冬明るさ+春/秋レート+梅雨+年較差)の総合で<b>一番の弱点軸が効く</b>。例: 宇都宮は冬が日本一クラスに明るく★だが、<b>秋の急降下</b>(★が見ない軸)が弱点で順位は中位。「冬の明るさ最優先なら★、全体バランスなら順位」で見る。</td></tr>
-      <tr><td>Station / Lat</td><td>地点名 / 緯度</td></tr>
+      <tr><td>★</td><td><b>Pareto最適</b>: この地点より「冬も明るく、<b>かつ</b>1年も穏やか」な地点が他に1つも無い。明るさと穏やかさの<b>どちらかを諦めないとこれ以上良くできない</b>＝トレードオフの最前線。
+        <b>※ ★なのに順位が下のことがある</b>: ★は<b>2軸</b>(冬の明るさ × 年間変動)だけ、順位は<b>5軸</b>総合で<b>一番の弱点軸が効く</b>。例: 宇都宮は冬が明るく★だが秋の急降下が弱点で順位は中位。</td></tr>
     </table>
-
     <h3>② スコア(低い=良い)</h3>
     <table>
-      <tr><th>指標</th><th>意味</th></tr>
       <tr><td>Score</td><td>選択中モデル(v2/v1)の総合スコア。低い=良い</td></tr>
-      <tr><td>score_v2</td><td>v2を「生成時の既定重み」で計算した固定参照値(スライダーを動かしても不変)</td></tr>
-      <tr><td>v1 Stability / Transition</td><td>旧v1(線形z和)の内訳: 安定性 / 季節遷移パート</td></tr>
+      <tr><td>score_v2</td><td>v2を「生成時の既定重み」で計算した固定参照値(スライダーで不変)</td></tr>
     </table>
     <p class="note">
-      <b>v2の作り方</b>: 各地点の各軸を「達成度 <b>d</b>(0〜1, 1=理想)」に変換 → スコア = 各軸の「不足 = 重み<b>w</b>×(1−d)」のうち<b>一番大きい軸</b>で決まる(=一番の弱点が支配する<b>非補償</b>。明るさを変動の小ささで買い戻せない)。
-      ここで <b>w は下⑥のスライダー</b>(0〜3の重視度。大=その軸を強く要求)、<b>d はデータから自動計算</b>(スライダーではない)。
-      <b>v2の重みにマイナスは無い</b>(全部「どれだけ要求するか」＝大きいほど罰を強める)。
-      ／ 参考: 旧v1モデルは重みが符号付きで <span class="band-red">＋=罰</span> / <span class="band-green">−=報酬</span> / 0=無視。
+      <b>v2の作り方</b>: 各地点の各軸を「達成度 <b>d</b>(0〜1, 1=理想)」に変換 → スコア = 各軸の「不足 = 重み<b>w</b>×(1−d)」のうち<b>一番大きい軸</b>で決まる(=一番の弱点が支配する<b>非補償</b>)。
+      <b>w は重みスライダー</b>(0〜3)、<b>d はデータから自動計算</b>。v2の重みにマイナスは無い。
+      v1は符号付き <span class="band-red">＋=罰</span> / <span class="band-green">−=報酬</span> / 0=無視。
     </p>
-
     <h3>③ レベル指標(明るさ。高い=明るい)</h3>
     <table>
       <tr><th>指標</th><th>良い向き</th><th>中身</th></tr>
       <tr><td>Mean</td><td>高</td><td>年平均の明るさ</td></tr>
       <tr><td>W.Floor</td><td>高</td><td><b>冬(12/15–2/15)の明るさ</b>。v2の主軸、冬うつ対策の核</td></tr>
-      <tr><td>summer_ceiling</td><td>(参考)</td><td>夏(6/15–8/15)の明るさ</td></tr>
     </table>
-
     <h3>④ 変動・季節遷移(低い=穏やか)</h3>
     <table>
       <tr><th>指標</th><th>良い向き</th><th>中身</th></tr>
-      <tr><td>Ampl.</td><td>低</td><td>年較差 (P95−P05)/平均。季節振幅の相対サイズ</td></tr>
-      <tr><td>ramp</td><td>低</td><td>1日あたり平均変化量</td></tr>
-      <tr><td>TV Σ|Δ|</td><td>低</td><td>年間の総変動 = Σ|前日差| (≒ramp×365)</td></tr>
-      <tr><td>exTV</td><td>低</td><td>TV − 2×年較差 = 単峰の季節掃引を超えた"往復"分＝<b>梅雨など非季節変動</b>。固定窓なし=時期非依存</td></tr>
-      <tr><td>Spr.Gain</td><td>低</td><td>春(トラフ→ピーク)の30日最大増加=立ち上がりの急さ(躁・早期発症リスク)</td></tr>
-      <tr><td>Aut.Drop</td><td>低</td><td>秋(ピーク→トラフ)の30日最大下落=落ち込みの急さ</td></tr>
-      <tr><td>spring_rise_days / autumn_fall_days</td><td>高</td><td>春に25→75% / 秋に75→25% へ変わる所要日数(大=ゆっくり=良)</td></tr>
+      <tr><td>Ampl.</td><td>低</td><td>年較差 (P95−P05)/平均</td></tr>
+      <tr><td>TV Σ|Δ|</td><td>低</td><td>年間の総変動 = Σ|前日差|</td></tr>
+      <tr><td>exTV</td><td>低</td><td>TV − 2×年較差 = 梅雨など非季節変動。固定窓なし=時期非依存</td></tr>
+      <tr><td>Spr.Gain / Aut.Drop</td><td>低</td><td>春の立ち上がり / 秋の落ち込みの急さ(30日最大変化)</td></tr>
     </table>
-
     <h3>⑤ 冬リスク overlay(<b>実観測日別1991-2020</b>。スコアには入れない red-flag)</h3>
     <table>
       <tr><th>列</th><th>良い向き</th><th>中身</th></tr>
-      <tr><td>冬リスク</td><td><span class="band-green">緑</span></td><td>連続曇天から判定: <span class="band-green">緑≤5日</span> / <span class="band-yellow">黄</span> / <span class="band-red">赤≥10日</span></td></tr>
-      <tr><td>連続曇天d</td><td>低</td><td><b>悪い冬の最長連続曇天日数(CVaR80)</b>: 「日照&lt;2hの日」の連続日数、各冬の最長を取り、悪い方20%の平均。「ハズレ冬にどれだけ日が射さない日が続くか」</td></tr>
+      <tr><td>冬リスク</td><td><span class="band-green">緑</span></td><td><span class="band-green">緑≤5日</span> / <span class="band-yellow">黄</span> / <span class="band-red">赤≥10日</span></td></tr>
+      <tr><td>連続曇天d</td><td>低</td><td>悪い冬の最長連続曇天日数(CVaR80, 日照&lt;2h)</td></tr>
       <tr><td>冬の実日照</td><td>高</td><td>実観測の冬(Nov–Mar)平均日照時間</td></tr>
-      <tr><td>当たり外れ</td><td>低</td><td>冬平均の年々ばらつき(CV%)。低い=毎年安定して同じ冬</td></tr>
+      <tr><td>当たり外れ</td><td>低</td><td>冬平均の年々ばらつき(CV%)</td></tr>
     </table>
-    <p class="note">⚠️ なぜスコアに入れないか: 連続曇天は W.Floor と r=−0.88(77%重複)で二重計上になる + 重み付けは確証バイアスを生むため、<b>警告表示のみ</b>。</p>
-
-    <h3>⑥ v2パラメータ(スライダー。動かすと再ランク)</h3>
+    <p class="note">⚠️ スコアに入れない理由: 連続曇天は W.Floor と r=−0.88(77%重複)で二重計上になる + 重み付けは確証バイアスを生むため、<b>警告表示のみ</b>。</p>
+    <h3>⑥ Compareタブの図</h3>
     <table>
-      <tr><th>スライダー</th><th>既定</th><th>意味</th></tr>
-      <tr><td>w_floor / w_spring / w_autumn</td><td>1.0 / 1.0 / 0.7</td><td>冬明るさ / 春レート / 秋レート の重み</td></tr>
-      <tr><td>w_excessTV / w_amplitude</td><td>0.3 / 0.3</td><td>非季節変動 / 年較差 の重み(探索的=低め)</td></tr>
-      <tr><td>k_floor</td><td>2.5</td><td>冬floorの飽和の強さ。大=暗い冬を急に罰し、明るい側は頭打ち</td></tr>
-      <tr><td>ρ (rho)</td><td>0.1</td><td>非補償集約のタイブレーク微調整</td></tr>
+      <tr><th>図</th><th>中身</th></tr>
+      <tr><td>年周カーブ</td><td>選択地点の平年値(15日平滑)を重ねる。光環境の年周プロファイル比較</td></tr>
+      <tr><td>冬の連続曇天</td><td>実日別から、各暦日に「日照&lt;2h」だった年の割合。日本海側の連続曇天が一目で分かる</td></tr>
+      <tr><td>v2 5軸レーダー</td><td>冬明るさ/春/秋/梅雨/年較差 の達成度d。なぜその順位かを分解(外側ほど良い)</td></tr>
+      <tr><td>太陽南中高度 / 昼の長さ</td><td>緯度から計算する天文カーブ。地点間の根本的な光量差</td></tr>
     </table>
-
-    <p class="note" style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;">
-      <b>使い方</b>: Score(低い=良い)で全体順位 → ただし候補は必ず<b>「冬リスク=緑」と「W.Floor高い」</b>を確認。
-      <span class="band-red">赤</span>バンド(連続2週間無日照=日本海側)は問答無用で除外、が一番効く使い方。
+    <p class="note" style="margin-top:14px;border-top:1px solid var(--border);padding-top:12px;">
+      <b>使い方の勘所</b>: Score(低=良)で全体順位 → 候補は必ず<b>「冬リスク=緑」「W.Floor高い」</b>を確認。
+      <span class="band-red">赤</span>バンド(連続2週間無日照=日本海側)は問答無用で除外、が一番効く。詳細は <code>docs/adr/006</code>。
     </p>
   </div>
 </div>
 
-<footer>
-  <div class="container">
-    Data: JMA 平年値 |
-    <a href="https://www.data.jma.go.jp/risk/obsdl/index.php">Source</a>
-  </div>
-</footer>
-
 <script>
-// ---- State ----
+// ============================================================
+//  State
+// ============================================================
 let ALL_DATA = {};
 let DATA = [];
+let SERIES = null;          // lazy series.json {meta, stations}
 let currentSource = 'solar';
 
 const SOURCE_META = {
-  solar:    { unit: 'MJ/m\u00B2/day', label: '全天日射量', meanLabel: 'Mean Solar Radiation' },
-  sunshine: { unit: 'h/day',     label: '日照時間',  meanLabel: 'Mean Sunshine Hours' },
+  solar:    { unit: 'MJ/m²/day', label: '全天日射量', meanLabel: 'Mean Solar Radiation', seriesKey: 'solar' },
+  sunshine: { unit: 'h/day',     label: '日照時間',  meanLabel: 'Mean Sunshine Hours', seriesKey: 'sun' },
 };
 
-// Weight config: key, label, default weight, description of what positive weight means
-const WEIGHT_FIELDS = [
-  { key: 'amplitude',        label: 'Amplitude',        defaultW:  1, desc: '+ = penalize large seasonal swing' },
-  { key: 'ramp',             label: 'Ramp',             defaultW:  1, desc: '+ = penalize fast daily change' },
-  { key: 'winter_floor',     label: 'Winter Floor',     defaultW: -1, desc: '- = reward bright winter' },
-  { key: 'mean_val',         label: 'Mean Value',       defaultW:  0, desc: '- = reward high annual average' },
-  { key: 'spring_30d_gain',  label: 'Spring 30d Gain',  defaultW:  1, desc: '+ = penalize sudden spring brightening' },
-  { key: 'autumn_30d_drop',  label: 'Autumn 30d Drop',  defaultW:  1, desc: '+ = penalize sudden autumn darkening' },
-  { key: 'spring_rise_days', label: 'Spring Rise Days', defaultW: -1, desc: '- = reward slow spring transition' },
-  { key: 'autumn_fall_days', label: 'Autumn Fall Days', defaultW: -1, desc: '- = reward slow autumn transition' },
-];
+// ----- selection -----
+let SELECTED = [];          // array of stids, order = selection order (stable colors)
+let HOVERED = null;         // stid currently hovered (linked brushing)
+const SEL_PALETTE = ['#6c9cff','#4caf82','#e0a030','#e05555','#b07cff','#33c4c4','#e070b0','#9acd32','#ff8c42','#4dd0e1'];
+function selColor(idx) { return SEL_PALETTE[idx % SEL_PALETTE.length]; }
+function selColorA(idx, a) { const h = selColor(idx); const n = parseInt(h.slice(1), 16); return `rgba(${(n>>16)&255},${(n>>8)&255},${n&255},${a})`; }
+function selColorOf(stid) { const i = SELECTED.indexOf(stid); return i < 0 ? null : selColor(i); }
+function rowByStid(stid) { return DATA.find(d => d.stid === stid); }
 
+// ----- v1 weights -----
+const WEIGHT_FIELDS = [
+  { key: 'amplitude',        label: 'Amplitude',        defaultW:  1, desc: '+ = 季節の振れ幅が大きいほど罰' },
+  { key: 'ramp',             label: 'Ramp',             defaultW:  1, desc: '+ = 日々の変化が速いほど罰' },
+  { key: 'winter_floor',     label: 'Winter Floor',     defaultW: -1, desc: '- = 冬が明るいほど報酬' },
+  { key: 'mean_val',         label: 'Mean Value',       defaultW:  0, desc: '- = 年平均が高いほど報酬' },
+  { key: 'spring_30d_gain',  label: 'Spring 30d Gain',  defaultW:  1, desc: '+ = 春の急な立ち上がりを罰' },
+  { key: 'autumn_30d_drop',  label: 'Autumn 30d Drop',  defaultW:  1, desc: '+ = 秋の急な落ち込みを罰' },
+  { key: 'spring_rise_days', label: 'Spring Rise Days', defaultW: -1, desc: '- = 春の遷移が緩やかなほど報酬' },
+  { key: 'autumn_fall_days', label: 'Autumn Fall Days', defaultW: -1, desc: '- = 秋の遷移が緩やかなほど報酬' },
+];
 let weights = {};
 WEIGHT_FIELDS.forEach(f => { weights[f.key] = f.defaultW; });
-
-// Z-score cache per source
 let zScoreCache = {};
 
-// ---- v2: science-grounded, absolute-anchored, non-compensatory scoring ----
-// See docs/adr/004_phase2-scoring-v2.md. (a)/(b)/(c) = same formula, different weights.
+// ----- v2 (science-grounded, absolute-anchored, non-compensatory) -----
 let scoringModel = 'v2';
-let ANCHORS = {};            // data.anchors[currentSource]
-let v2weights = {};          // initialized from data.v2_defaults
-let V2_DEFAULTS_CACHE = {};  // pristine copy of data.v2_defaults (for Reset)
+let ANCHORS = {};
+let v2weights = {};
+let V2_DEFAULTS_CACHE = {};
 
 const V2_FIELDS = [
-  { key: 'w_floor',     label: '冬の明るさ 重み',   min: 0, max: 3,   step: 0.1,  desc: '「冬の明るさ(W.Floor)」をどれだけ重視するか。大きいほど、冬が暗い地点を強く下げる' },
-  { key: 'w_spring',    label: '春レート 重み',     min: 0, max: 3,   step: 0.1,  desc: '「春に急に明るくなる地点」をどれだけ嫌うか(急上昇=躁・早期発症リスク)。大=罰を強める' },
-  { key: 'w_autumn',    label: '秋レート 重み',     min: 0, max: 3,   step: 0.1,  desc: '「秋に急に暗くなる地点」をどれだけ嫌うか(急降下=うつ側)。大=罰を強める' },
-  { key: 'w_excessTV',  label: '梅雨/非季節 重み',  min: 0, max: 3,   step: 0.1,  desc: '「梅雨など季節外れの変動が大きい地点」をどれだけ嫌うか。大=罰を強める' },
-  { key: 'w_amplitude', label: '年較差 重み',       min: 0, max: 3,   step: 0.1,  desc: '「夏と冬の差(年較差)が大きい地点」をどれだけ嫌うか。大=罰を強める' },
-  { key: 'k_floor',     label: '冬floorの効き方 k', min: 0, max: 6,   step: 0.1,  desc: '冬の明るさの評価カーブの形。大きいほど「暗い冬を急に悪く」評価し、十分明るい所はそれ以上加点しない(頭打ち)' },
-  { key: 'rho',         label: '同点の微調整 ρ',    min: 0, max: 0.5, step: 0.01, desc: '基本いじらなくてOK(0付近)。普段スコアは「一番ダメな1軸」だけで決まるが、ρを上げると「全軸の合計」も少し効いて同点を割る' },
+  { key: 'w_floor',     label: '冬の明るさ 重み',   min: 0, max: 3,   step: 0.1,  desc: '冬の明るさ(W.Floor)をどれだけ重視するか。大=冬が暗い地点を強く下げる' },
+  { key: 'w_spring',    label: '春レート 重み',     min: 0, max: 3,   step: 0.1,  desc: '春に急に明るくなる地点をどれだけ嫌うか(躁・早期発症リスク)' },
+  { key: 'w_autumn',    label: '秋レート 重み',     min: 0, max: 3,   step: 0.1,  desc: '秋に急に暗くなる地点をどれだけ嫌うか(うつ側)' },
+  { key: 'w_excessTV',  label: '梅雨/非季節 重み',  min: 0, max: 3,   step: 0.1,  desc: '梅雨など季節外れの変動が大きい地点をどれだけ嫌うか' },
+  { key: 'w_amplitude', label: '年較差 重み',       min: 0, max: 3,   step: 0.1,  desc: '夏冬の差(年較差)が大きい地点をどれだけ嫌うか' },
+  { key: 'k_floor',     label: '冬floorの効き方 k', min: 0, max: 6,   step: 0.1,  desc: '冬の明るさ評価カーブの形。大=暗い冬を急に悪く評価し、明るい所は頭打ち' },
+  { key: 'rho',         label: '同点の微調整 ρ',    min: 0, max: 0.5, step: 0.01, desc: '基本いじらなくてOK。上げると全軸合計も少し効いて同点を割る' },
 ];
-
 const V2_OBJ = ['floor', 'spring', 'autumn', 'excessTV', 'amplitude'];
+const V2_OBJ_LABEL = { floor: '冬明るさ', spring: '春レート', autumn: '秋レート', excessTV: '梅雨/非季節', amplitude: '年較差' };
 
 function v2Desir(d, anchors, k) {
   const cl = x => Math.max(0, Math.min(1, x));
@@ -525,8 +450,6 @@ function getMetricMeta() {
   return {
     overall:         { label: 'Active Score', lower_is_good: true, fmt: v => v.toFixed(2) },
     score_v2:        { label: 'score_v2 (既定重み/固定)', lower_is_good: true, fmt: v => v.toFixed(3) },
-    stability:       { label: 'v1 Stability', lower_is_good: true, fmt: v => v.toFixed(2) },
-    transition:      { label: 'v1 Transition', lower_is_good: true, fmt: v => v.toFixed(2) },
     mean_val:        { label: `Mean (${u})`, lower_is_good: false, fmt: v => v.toFixed(2) },
     amplitude:       { label: 'Amplitude', lower_is_good: true, fmt: v => v.toFixed(3) },
     ramp:            { label: 'Ramp', lower_is_good: true, fmt: v => v.toFixed(4) },
@@ -549,55 +472,32 @@ const TABLE_COLS = [
   { key: 'pareto', label: '★', fmt: v => v ? '<span class="pareto-star">★</span>' : '' },
   { key: 'name', label: 'Station', fmt: v => v },
   { key: 'overall', label: 'Score' },
-  { key: 'mean_val', label: 'Mean' },
-  { key: 'amplitude', label: 'Ampl.' },
   { key: 'winter_floor', label: 'W.Floor' },
   { key: 'risk_band', label: '冬リスク', fmt: v => v ? `<span class="band-${v}">${({green:'緑',yellow:'黄',red:'赤'})[v]}</span>` : '-' },
   { key: 'dark_spell', label: '連続曇天d', fmt: v => v == null ? '-' : v.toFixed(1) },
-  { key: 'total_variation', label: 'TV Σ|Δ|' },
+  { key: 'amplitude', label: 'Ampl.' },
   { key: 'excess_tv', label: 'exTV' },
-  { key: 'spring_30d_gain', label: 'Spr.Gain' },
-  { key: 'autumn_30d_drop', label: 'Aut.Drop' },
-  { key: 'lat', label: 'Lat', fmt: v => v ? v.toFixed(1) : '?' },
+  { key: 'spring_30d_gain', label: 'Spr' },
+  { key: 'autumn_30d_drop', label: 'Aut' },
 ];
 
-// Hover descriptions for table-header columns (and reusable elsewhere).
 const HELP = {
   rank: '現在のスコアでの順位 (1=最良)',
-  pareto: '★=この地点より「冬も明るく、かつ1年も穏やか」な地点が他に1つも無い、という地点(明るさ⇔穏やかさのトレードオフの最前線)',
-  name: '地点名',
+  pareto: '★=この地点より「冬も明るく、かつ1年も穏やか」な地点が他に無い(トレードオフ最前線)',
+  name: '地点名 (クリックで選択)',
   overall: '総合スコア(低い=良い)。選択中モデル(v2/v1)で計算',
-  score_v2: 'v2を既定重みで計算した固定参照値(スライダーで不変)',
-  stability: 'v1(線形z和)の安定性パート',
-  transition: 'v1の季節遷移パート',
-  mean_val: '年平均の明るさ(高い=明るい)。日照=時間/日, 日射=MJ/m²/日',
-  amplitude: '年較差 (P95−P05)/平均。低い=季節変化が小さく安定',
-  ramp: '1日あたりの平均変化量。低い=穏やか',
   winter_floor: '冬(12/15−2/15)の明るさ。高い=良い。v2の主軸',
-  summer_ceiling: '夏(6/15−8/15)の明るさ(参考)',
-  total_variation: '年間の総変動 Σ|前日差|。低い=穏やか',
-  excess_tv: '非季節変動(梅雨等)。TV−2×年較差。固定窓なし。低い=良い',
-  dark_spell: '悪い冬の最長連続曇天日数(CVaR80, 日照<2h, 実観測日別)。低い=良い',
-  winter_obs: '実観測の冬(Nov−Mar)平均日照時間。高い=良い',
-  interann_cv: '冬平均の年々ばらつき(CV%)。低い=毎年安定した冬',
   risk_band: '冬リスク: 連続曇天から 緑≤5日 / 黄 / 赤≥10日(実日別)。スコア外の警告',
+  dark_spell: '悪い冬の最長連続曇天日数(CVaR80, 日照<2h, 実観測日別)。低い=良い',
+  amplitude: '年較差 (P95−P05)/平均。低い=安定',
+  excess_tv: '非季節変動(梅雨等)。TV−2×年較差。低い=良い',
   spring_30d_gain: '春の30日最大増加=立ち上がりの急さ。低い=緩やか',
   autumn_30d_drop: '秋の30日最大下落=落ち込みの急さ。低い=緩やか',
-  spring_rise_days: '春に25→75%へ変わる所要日数。大=ゆっくり=良',
-  autumn_fall_days: '秋に75→25%へ変わる所要日数。大=ゆっくり=良',
-  lat: '緯度',
 };
 
-// Glossary modal open/close
-(() => {
-  const m = document.getElementById('help-modal');
-  document.getElementById('help-open').addEventListener('click', () => m.classList.add('open'));
-  document.getElementById('help-close').addEventListener('click', () => m.classList.remove('open'));
-  m.addEventListener('click', e => { if (e.target === m) m.classList.remove('open'); });
-  document.addEventListener('keydown', e => { if (e.key === 'Escape') m.classList.remove('open'); });
-})();
-
-// ---- Z-score computation ----
+// ============================================================
+//  Scoring
+// ============================================================
 function computeZScores(data) {
   const z = {};
   WEIGHT_FIELDS.forEach(f => {
@@ -608,7 +508,6 @@ function computeZScores(data) {
   });
   return z;
 }
-
 function applyWeights() {
   if (scoringModel === 'v2') {
     DATA.forEach(d => { d.overall = Math.round(v2Score(d, ANCHORS, v2weights) * 1000) / 1000; });
@@ -621,14 +520,14 @@ function applyWeights() {
       d.overall = Math.round(score * 1000) / 1000;
     });
   }
-  // Recompute ranks (low = good for both models)
   const sorted = [...DATA].map((d, i) => ({ d, i })).sort((a, b) => a.d.overall - b.d.overall);
   sorted.forEach((item, rank) => { item.d.rank = rank + 1; });
 }
 
-// ---- Weight panel (model-aware: v1 linear z-sum / v2 non-compensatory) ----
+// ============================================================
+//  Weight panel
+// ============================================================
 function weightClass(v) {
-  // v1 weights are signed (penalize/reward); v2 weights are non-negative magnitudes.
   if (scoringModel === 'v2') return '';
   return v > 0 ? 'positive' : v < 0 ? 'negative' : 'zero';
 }
@@ -637,13 +536,10 @@ function fmtWeight(v) {
   const s = v.toFixed(1);
   return v > 0 ? '+' + s : s;
 }
-
 function buildWeightPanel() {
   const grid = document.getElementById('weight-grid');
   const fields = activeFields();
   const w = activeWeights();
-  document.getElementById('weight-panel-title').textContent =
-    scoringModel === 'v2' ? 'v2 Score Parameters (\u975E\u88DC\u511F)' : 'v1 Score Weights (\u7DDA\u5F62 z \u548C)';
   grid.innerHTML = '';
   fields.forEach(f => {
     const min = f.min !== undefined ? f.min : -50;
@@ -655,11 +551,9 @@ function buildWeightPanel() {
     row.innerHTML = `
       <label>${f.label}</label>
       <input type="range" min="${min}" max="${max}" step="${step}" value="${w[f.key]}" data-key="${f.key}">
-      <span class="weight-val" data-key="${f.key}">${fmtWeight(w[f.key])}</span>
-    `;
+      <span class="weight-val" data-key="${f.key}">${fmtWeight(w[f.key])}</span>`;
     grid.appendChild(row);
   });
-
   grid.querySelectorAll('input[type=range]').forEach(slider => {
     slider.addEventListener('input', () => {
       const key = slider.dataset.key;
@@ -676,52 +570,41 @@ function buildWeightPanel() {
   });
   updateFormulaPreview();
 }
-
 function onWeightsChanged() {
   applyWeights();
   updateFormulaPreview();
-  renderSummary();
-  renderMap();
+  restyleMarkers();
   renderScatter();
   renderTable();
+  renderCompareLive();   // ranks/scores in the compare stat table
 }
-
 function updateFormulaPreview() {
   const el = document.getElementById('formula-preview');
   if (scoringModel === 'v2') {
     const w = v2weights;
-    const NM = { floor: '\u51AC\u660E\u308B\u3055', spring: '\u6625\u30EC\u30FC\u30C8', autumn: '\u79CB\u30EC\u30FC\u30C8', excessTV: '\u6885\u96E8/\u975E\u5B63\u7BC0', amplitude: '\u5E74\u8F03\u5DEE' };
-    const wline = V2_OBJ.map(o => `${NM[o]}=${(w['w_' + o]).toFixed(2)}`).join('\u3000 ');
+    const wline = V2_OBJ.map(o => `${V2_OBJ_LABEL[o]}=${(w['w_' + o]).toFixed(2)}`).join('　 ');
     el.innerHTML =
-      '<span class="fw-zero">\u91CD\u307F = \u5404\u8EF8\u306E\u300C\u91CD\u8996\u5EA6\u300D(0\u301C3)\u3002\u5927\u304D\u3044\u307B\u3069\u305D\u306E\u8EF8\u3092\u5F37\u304F\u8981\u6C42\u3057\u3001\u6E80\u305F\u3055\u306A\u3044\u5730\u70B9\u3092\u4E0B\u3052\u308B\u3002<b>v2\u306B\u30DE\u30A4\u30CA\u30B9(\u5831\u916C)\u306F\u7121\u3057</b>\u3002</span>\n'
-      + '<b>score_v2</b>(\u4F4E\u3044=\u826F\u3044) = \u5404\u8EF8\u306E\u300C\u4E0D\u8DB3 = \u91CD\u307F\u00D7(1\u2212\u9054\u6210\u5EA6)\u300D\u306E\u3046\u3061 <b>\u4E00\u756A\u5927\u304D\u3044\u8EF8</b>\u3067\u6C7A\u307E\u308B + \u03C1\u3067\u5FAE\u8ABF\u6574\n'
-      + '<span class="fw-zero">\u3000\u9054\u6210\u5EA6 = \u5404\u5730\u70B9\u304C\u305D\u306E\u8EF8\u3067\u3069\u308C\u3060\u3051\u7406\u60F3\u306B\u8FD1\u3044\u304B(0\u301C1, \u30C7\u30FC\u30BF\u304B\u3089\u81EA\u52D5\u8A08\u7B97) / \u4E00\u756A\u306E\u5F31\u70B9\u304C\u652F\u914D = \u660E\u308B\u3055\u3092\u5909\u52D5\u306E\u5C0F\u3055\u3055\u3067\u8CB7\u3044\u623B\u305B\u306A\u3044(\u975E\u88DC\u511F)</span>\n'
-      + `floor\u98FD\u548C k=${w.k_floor.toFixed(1)}\u3000\u03C1=${w.rho.toFixed(2)}\u3000\u3000` + wline;
+      '<span class="fw-zero">重み = 各軸の「重視度」(0〜3)。大きいほどその軸を強く要求し、満たさない地点を下げる。<b>v2にマイナス(報酬)は無し</b>。</span>\n'
+      + '<b>score_v2</b>(低い=良い) = 各軸の「不足 = 重み×(1−達成度)」のうち <b>一番大きい軸</b>で決まる + ρで微調整\n'
+      + `floor飽和 k=${w.k_floor.toFixed(1)}　ρ=${w.rho.toFixed(2)}　　` + wline;
     return;
   }
   const parts = [];
   WEIGHT_FIELDS.forEach(f => {
     const w = weights[f.key];
-    if (w === 0) { parts.push(`<span class="fw-zero"> 0.0\u00B7z(${f.key})</span>`); return; }
+    if (w === 0) { parts.push(`<span class="fw-zero"> 0.0·z(${f.key})</span>`); return; }
     const sign = w > 0 ? '+' : '';
     const cls = w > 0 ? 'fw-pos' : 'fw-neg';
-    parts.push(`<span class="${cls}">${sign}${w.toFixed(1)}</span>\u00B7z(${f.key})`);
+    parts.push(`<span class="${cls}">${sign}${w.toFixed(1)}</span>·z(${f.key})`);
   });
   el.innerHTML =
-    '<span class="fw-zero">\u91CD\u307F: </span><span class="fw-pos">\uFF0B(\u8D64)=\u305D\u306E\u6307\u6A19\u304C\u5927\u304D\u3044\u307B\u3069\u7F70(\u30B9\u30B3\u30A2\u60AA\u5316)</span>'
-    + '<span class="fw-zero">\u3000/\u3000</span><span class="fw-neg">\u2212(\u7DD1)=\u5927\u304D\u3044\u307B\u3069\u5831\u916C(\u826F\u5316)</span>'
-    + '<span class="fw-zero">\u3000/\u30000=\u7121\u8996</span>\n'
-    + '<b>overall</b>(\u4F4E\u3044=\u826F\u3044) = ' + parts.join('  ');
+    '<span class="fw-pos">＋(赤)=大きいほど罰</span><span class="fw-zero"> / </span><span class="fw-neg">−(緑)=大きいほど報酬</span><span class="fw-zero"> / 0=無視</span>\n'
+    + '<b>overall</b>(低い=良い) = ' + parts.join('  ');
 }
-
 function setWeights(newWeights) {
   const w = activeWeights();
-  activeFields().forEach(f => {
-    if (newWeights[f.key] !== undefined) w[f.key] = newWeights[f.key];
-  });
-  document.querySelectorAll('#weight-grid input[type=range]').forEach(slider => {
-    slider.value = w[slider.dataset.key];
-  });
+  activeFields().forEach(f => { if (newWeights[f.key] !== undefined) w[f.key] = newWeights[f.key]; });
+  document.querySelectorAll('#weight-grid input[type=range]').forEach(slider => { slider.value = w[slider.dataset.key]; });
   document.querySelectorAll('#weight-grid .weight-val').forEach(span => {
     const val = w[span.dataset.key];
     span.textContent = fmtWeight(val);
@@ -730,294 +613,584 @@ function setWeights(newWeights) {
   onWeightsChanged();
 }
 
-// ---- Scoring model switch ----
-document.querySelectorAll('.model-btn').forEach(btn => {
+// ============================================================
+//  Top-bar wiring
+// ============================================================
+document.getElementById('controls-toggle').addEventListener('click', () => {
+  const body = document.getElementById('controls-body');
+  body.classList.toggle('collapsed');
+  document.getElementById('controls-toggle').textContent =
+    body.classList.contains('collapsed') ? '▾ 重み調整' : '▴ 重み調整';
+  setTimeout(() => map.invalidateSize(), 0);
+});
+document.querySelectorAll('#model-group .btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const m = btn.dataset.model;
     if (m === scoringModel) return;
     scoringModel = m;
-    document.querySelectorAll('.model-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('#model-group .btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
-    document.getElementById('model-note').textContent = m === 'v2'
-      ? '\u98FD\u548C\u3057\u305F\u51ACfloor + \u6625/\u79CB\u30EC\u30FC\u30C8 + \u6885\u96E8\u3002\u5F31\u3044\u8EF8\u304C\u652F\u914D\uFF08floor\u3068delta\u306F\u4EA4\u63DB\u4E0D\u53EF\uFF09\u3002'
-      : '\u5404\u6307\u6A19\u306E z \u30B9\u30B3\u30A2\u306E\u91CD\u307F\u4ED8\u304D\u548C\uFF08\u88DC\u511F\u578B\u30FB\u30B5\u30F3\u30D7\u30EB\u4F9D\u5B58\uFF09\u3002';
     buildWeightPanel();
     applyWeights();
     renderAll();
   });
 });
-
-// Toggle
-document.getElementById('weight-toggle').addEventListener('click', () => {
-  const body = document.getElementById('weight-body');
-  const label = document.getElementById('weight-toggle-label');
-  body.classList.toggle('collapsed');
-  label.innerHTML = body.classList.contains('collapsed') ? '&#9660; open' : '&#9650; close';
-});
-
-// Reset / Zero
-document.getElementById('weight-reset').addEventListener('click', () => {
-  if (scoringModel === 'v2') { setWeights({ ...V2_DEFAULTS_CACHE }); return; }
-  const dw = {};
-  WEIGHT_FIELDS.forEach(f => { dw[f.key] = f.defaultW; });
-  setWeights(dw);
-});
-document.getElementById('weight-zero').addEventListener('click', () => {
-  const zw = {};
-  // For v2, only zero the objective weights; keep k_floor / rho (shape params).
-  activeFields().forEach(f => {
-    zw[f.key] = (f.key === 'k_floor' || f.key === 'rho') ? activeWeights()[f.key] : 0;
-  });
-  setWeights(zw);
-});
-
-// ---- Source switching ----
-document.querySelectorAll('.source-btn').forEach(btn => {
+document.querySelectorAll('#source-group .btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const src = btn.dataset.source;
     if (src === currentSource) return;
     currentSource = src;
-    document.querySelectorAll('.source-btn').forEach(b => b.classList.remove('active'));
+    document.querySelectorAll('#source-group .btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     DATA = ALL_DATA[currentSource];
     ANCHORS = (ALL_DATA.anchors && ALL_DATA.anchors[currentSource]) || {};
+    // keep only selected stids that exist in the new source
+    SELECTED = SELECTED.filter(stid => DATA.some(d => d.stid === stid));
     applyWeights();
     renderAll();
   });
 });
+document.getElementById('weight-reset').addEventListener('click', () => {
+  if (scoringModel === 'v2') { setWeights({ ...V2_DEFAULTS_CACHE }); return; }
+  const dw = {}; WEIGHT_FIELDS.forEach(f => { dw[f.key] = f.defaultW; }); setWeights(dw);
+});
+document.getElementById('weight-zero').addEventListener('click', () => {
+  const zw = {};
+  activeFields().forEach(f => { zw[f.key] = (f.key === 'k_floor' || f.key === 'rho') ? activeWeights()[f.key] : 0; });
+  setWeights(zw);
+});
 
-// ---- Tabs ----
-document.querySelectorAll('.tab').forEach(tab => {
+// Glossary modal
+(() => {
+  const m = document.getElementById('help-modal');
+  document.getElementById('help-open').addEventListener('click', () => m.classList.add('open'));
+  document.getElementById('help-close').addEventListener('click', () => m.classList.remove('open'));
+  m.addEventListener('click', e => { if (e.target === m) m.classList.remove('open'); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') m.classList.remove('open'); });
+})();
+
+// Pane tabs
+document.querySelectorAll('.pane-tab').forEach(tab => {
   tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-    document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+    document.querySelectorAll('.pane-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.pane-panel').forEach(p => p.classList.remove('active'));
     tab.classList.add('active');
     document.getElementById(tab.dataset.panel).classList.add('active');
-    if (tab.dataset.panel === 'panel-scatter') resizeScatter();
-    if (tab.dataset.panel === 'panel-map') map.invalidateSize();
+    if (tab.dataset.panel === 'pp-scatter') setTimeout(resizeScatter, 0);
+    if (tab.dataset.panel === 'pp-compare') renderCompare();
   });
 });
 
-// ---- Render All ----
+// Pane collapse
+document.getElementById('pane-toggle').addEventListener('click', () => {
+  const pane = document.getElementById('rightpane');
+  const main = document.getElementById('main');
+  pane.classList.toggle('collapsed');
+  main.classList.toggle('pane-collapsed');
+  document.getElementById('pane-toggle').textContent = pane.classList.contains('collapsed') ? '◀' : '▶';
+  setTimeout(() => { map.invalidateSize(); resizeScatter(); renderCompare(); }, 200);
+});
+
+// Selection tray buttons
+document.getElementById('sel-clear').addEventListener('click', () => { SELECTED = []; onSelectionChanged(); });
+document.getElementById('sel-demo').addEventListener('click', () => {
+  // 松本/金沢 only exist in the 日照時間 source → switch there so all three show
+  if (currentSource !== 'sunshine') document.querySelector('#source-group .btn[data-source=sunshine]').click();
+  const want = ['s47618', 's47417', 's47605']; // 松本 / 帯広 / 金沢
+  SELECTED = want.filter(stid => DATA.some(d => d.stid === stid));
+  onSelectionChanged();
+});
+document.getElementById('rank-selonly').addEventListener('change', renderTable);
+
+// ============================================================
+//  Render orchestration
+// ============================================================
 function renderAll() {
   const sm = SOURCE_META[currentSource];
-  document.getElementById('subtitle').textContent =
-    `${sm.label}平年値から算出した安定性・季節遷移メトリクス (${DATA.length}地点)`;
+  document.getElementById('subtitle').textContent = `${sm.label} · ${DATA.length}地点`;
   document.getElementById('source-note').textContent =
-    currentSource === 'solar'
-      ? 'Default: total radiation energy including diffuse light through clouds'
-      : 'Binary threshold measure (direct sunshine > 120 W/m\u00B2). 3x more stations.';
+    currentSource === 'solar' ? '雲を通す散乱光込みの総日射エネルギー' : '直達日射>120W/m² の時間。3倍の地点数';
   document.getElementById('opt-mean-val').textContent = `${sm.meanLabel} (${sm.unit})`;
-
-  renderSummary();
   renderMap();
   populateScatterSelects();
   renderScatter();
   renderTable();
+  renderSelectionTray();
   updateFormulaPreview();
+  renderCompare();
 }
 
-// ---- Summary Cards ----
-function renderSummary() {
-  const sm = SOURCE_META[currentSource];
-  const byScore = [...DATA].sort((a, b) => a.overall - b.overall);
-  const top = byScore[0];
-  const cards = [
-    { title: `${sm.label} / ${DATA.length} Stations`, value: DATA.length },
-    { title: 'Best Overall', value: `${top.name} (${top.overall.toFixed(2)})` },
-    { title: 'Lowest Amplitude', value: (() => { const s = [...DATA].sort((a,b) => a.amplitude - b.amplitude)[0]; return `${s.name} (${s.amplitude.toFixed(3)})`; })() },
-    { title: 'Highest Winter Floor', value: (() => { const s = [...DATA].sort((a,b) => b.winter_floor - a.winter_floor)[0]; return `${s.name} (${s.winter_floor.toFixed(1)})`; })() },
-  ];
-  document.getElementById('summary-cards').innerHTML = cards.map(c =>
-    `<div class="info-card"><h3>${c.title}</h3><div class="value">${c.value}</div></div>`
-  ).join('');
-}
-
-// ---- Map ----
-const map = L.map('map').setView([36.5, 138], 5);
+// ============================================================
+//  Map
+// ============================================================
+const map = L.map('map', { zoomControl: true }).setView([37.5, 137], 5);
 L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
   attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; <a href="https://carto.com/">CARTO</a>',
   maxZoom: 18,
 }).addTo(map);
 
-let mapMarkers = [];
+let markerByStid = {};
+let MAP_STATE = { metric: 'overall', min: 0, max: 1, invert: true };
 
 function colorScale(val, min, max, invert) {
   let t = (val - min) / (max - min || 1);
   if (invert) t = 1 - t;
+  t = Math.max(0, Math.min(1, t));   // clamp: scores can fall outside the cached bounds
   const r = t < 0.5 ? Math.round(255 * t * 2) : 255;
   const g = t < 0.5 ? 255 : Math.round(255 * (1 - (t - 0.5) * 2));
   return `rgb(${r},${g},60)`;
 }
-
+function baseColor(d) {
+  const v = d[MAP_STATE.metric];
+  if (v == null || isNaN(v)) return '#555';
+  return colorScale(v, MAP_STATE.min, MAP_STATE.max, MAP_STATE.invert);
+}
+function applyMarkerStyle(d) {
+  const mk = markerByStid[d.stid];
+  if (!mk) return;
+  const selIdx = SELECTED.indexOf(d.stid);
+  const sel = selIdx >= 0;
+  const hov = HOVERED === d.stid;
+  let radius = sel ? 10 : (d.pareto ? 9 : 7);
+  if (hov) radius += 3;
+  let stroke = sel ? selColor(selIdx) : (d.pareto ? '#fff' : '#222');
+  let sw = sel ? 3 : (d.pareto ? 2 : 1);
+  if (hov) { stroke = '#fff'; sw = Math.max(sw, 3); }
+  mk.setStyle({ radius, color: stroke, weight: sw, fillColor: baseColor(d), fillOpacity: sel ? 0.95 : 0.85 });
+  if (sel || hov) mk.bringToFront();
+}
 function renderMap() {
   const metric = document.getElementById('map-metric').value;
-  const METRIC_META = getMetricMeta();
-  const meta = METRIC_META[metric];
-  const sm = SOURCE_META[currentSource];
+  const meta = getMetricMeta()[metric];
   const filtered = DATA.filter(d => d.lat != null);
   const vals = filtered.map(d => d[metric]).filter(v => v != null && !isNaN(v));
-  const min = Math.min(...vals);
-  const max = Math.max(...vals);
+  MAP_STATE = { metric, min: Math.min(...vals), max: Math.max(...vals), invert: meta.lower_is_good };
 
-  mapMarkers.forEach(m => map.removeLayer(m));
-  mapMarkers = [];
-
+  Object.values(markerByStid).forEach(m => map.removeLayer(m));
+  markerByStid = {};
   filtered.forEach(d => {
-    const color = (d[metric] == null || isNaN(d[metric]))
-      ? '#555' : colorScale(d[metric], min, max, meta.lower_is_good);
-    const marker = L.circleMarker([d.lat, d.lon], {
-      radius: d.pareto ? 9 : 7, fillColor: color,
-      color: d.pareto ? '#fff' : '#222', weight: d.pareto ? 2 : 1, fillOpacity: 0.85,
-    }).addTo(map);
-
-    marker.bindPopup(`
-      <div style="font-size:13px;line-height:1.6;">
-        <strong>${d.name}</strong> (#${d.rank}) ${d.pareto ? '<span style="color:#c8a000;">★ Pareto</span>' : ''}<br>
-        Score: <b>${d.overall.toFixed(2)}</b><br>
-        ${meta.label}: <b>${meta.fmt(d[metric])}</b><br>
-        Mean: ${d.mean_val.toFixed(2)} ${sm.unit}<br>
-        Winter Floor: ${d.winter_floor.toFixed(2)} ${sm.unit}<br>
-        Total Variation: ${d.total_variation.toFixed(2)}, Excess TV: ${d.excess_tv.toFixed(2)}
-      </div>
-    `);
-    marker.bindTooltip(d.name, { permanent: false, direction: 'top', offset: [0, -8] });
-    mapMarkers.push(marker);
+    const mk = L.circleMarker([d.lat, d.lon], { fillOpacity: 0.85 }).addTo(map);
+    mk.bindTooltip(d.name, { permanent: false, direction: 'top', offset: [0, -8] });
+    mk.on('click', () => toggleSelect(d.stid));
+    mk.on('mouseover', () => setHover(d.stid));
+    mk.on('mouseout', () => setHover(null));
+    markerByStid[d.stid] = mk;
+    applyMarkerStyle(d);
   });
 }
-
+function computeMapBounds() {
+  // recompute color bounds for the current metric (e.g. `overall` after a weight edit)
+  const vals = DATA.filter(d => d.lat != null).map(d => d[MAP_STATE.metric]).filter(v => v != null && !isNaN(v));
+  if (vals.length) { MAP_STATE.min = Math.min(...vals); MAP_STATE.max = Math.max(...vals); }
+}
+function restyleMarkers() { computeMapBounds(); DATA.forEach(d => applyMarkerStyle(d)); }
 document.getElementById('map-metric').addEventListener('change', renderMap);
 
-// ---- Scatter ----
-let scatterInitialized = false;
+// ============================================================
+//  Selection + linked brushing
+// ============================================================
+function toggleSelect(stid) {
+  const i = SELECTED.indexOf(stid);
+  if (i >= 0) SELECTED.splice(i, 1); else SELECTED.push(stid);
+  onSelectionChanged();
+}
+function setHover(stid) {
+  if (HOVERED === stid) return;
+  const prev = HOVERED; HOVERED = stid;
+  [prev, stid].forEach(s => { const d = s && rowByStid(s); if (d) applyMarkerStyle(d); });
+  // table row highlight
+  document.querySelectorAll('#table-body tr').forEach(tr => {
+    tr.classList.toggle('hovered', tr.dataset.stid === stid);
+  });
+}
+function onSelectionChanged() {
+  renderSelectionTray();
+  restyleMarkers();
+  renderScatter();
+  renderTable();
+  renderCompare();
+}
+function renderSelectionTray() {
+  const el = document.getElementById('tray-chips');
+  if (!SELECTED.length) {
+    el.innerHTML = '<span class="cmp-na" style="font-size:0.78rem;">なし — 地図/散布図/表でクリック</span>';
+    return;
+  }
+  el.innerHTML = SELECTED.map((stid, i) => {
+    const d = rowByStid(stid);
+    const nm = d ? d.name : stid;
+    return `<span class="chip"><span class="dot" style="background:${selColor(i)}"></span>${nm}` +
+           ` <span class="chip-x" data-stid="${stid}">×</span></span>`;
+  }).join('');
+  el.querySelectorAll('.chip-x').forEach(x =>
+    x.addEventListener('click', () => toggleSelect(x.dataset.stid)));
+}
 
+// ============================================================
+//  Scatter
+// ============================================================
+let scatterInitialized = false;
 function populateScatterSelects() {
-  const METRIC_META = getMetricMeta();
-  const keys = Object.keys(METRIC_META);
+  const META = getMetricMeta();
+  const keys = Object.keys(META);
   const prevX = document.getElementById('scatter-x').value;
   const prevY = document.getElementById('scatter-y').value;
   const prevC = document.getElementById('scatter-color').value;
-
   ['scatter-x', 'scatter-y', 'scatter-color'].forEach(id => {
     const sel = document.getElementById(id);
     sel.innerHTML = '';
-    keys.forEach(k => {
-      const opt = document.createElement('option');
-      opt.value = k; opt.textContent = METRIC_META[k].label;
-      sel.appendChild(opt);
-    });
+    keys.forEach(k => { const o = document.createElement('option'); o.value = k; o.textContent = META[k].label; sel.appendChild(o); });
   });
-
   document.getElementById('scatter-x').value = prevX || 'amplitude';
   document.getElementById('scatter-y').value = prevY || 'winter_floor';
   document.getElementById('scatter-color').value = prevC || 'overall';
-
   if (!scatterInitialized) {
     ['scatter-x', 'scatter-y', 'scatter-color'].forEach(id =>
-      document.getElementById(id).addEventListener('change', renderScatter)
-    );
+      document.getElementById(id).addEventListener('change', renderScatter));
     scatterInitialized = true;
   }
 }
-
 function renderScatter() {
-  const METRIC_META = getMetricMeta();
+  const META = getMetricMeta();
   const xKey = document.getElementById('scatter-x').value;
   const yKey = document.getElementById('scatter-y').value;
   const cKey = document.getElementById('scatter-color').value;
-  const xMeta = METRIC_META[xKey], yMeta = METRIC_META[yKey], cMeta = METRIC_META[cKey];
+  const xMeta = META[xKey], yMeta = META[yKey], cMeta = META[cKey];
   const filtered = DATA.filter(d => d.lat != null);
 
-  const trace = {
+  const baseTrace = {
     x: filtered.map(d => d[xKey]), y: filtered.map(d => d[yKey]),
-    text: filtered.map(d => `${d.name} (#${d.rank})<br>Overall: ${d.overall.toFixed(2)}<br>${xMeta.label}: ${xMeta.fmt(d[xKey])}<br>${yMeta.label}: ${yMeta.fmt(d[yKey])}`),
+    customdata: filtered.map(d => d.stid),
+    text: filtered.map(d => `${d.name} (#${d.rank})<br>Score: ${d.overall.toFixed(2)}<br>${xMeta.label}: ${xMeta.fmt(d[xKey])}<br>${yMeta.label}: ${yMeta.fmt(d[yKey])}`),
     hoverinfo: 'text', mode: 'markers+text',
-    textposition: 'top center', textfont: { size: 9, color: '#8a8d9a' },
-    texttemplate: filtered.map(d => d.name),
+    textposition: 'top center', textfont: { size: 8, color: '#8a8d9a' },
+    texttemplate: filtered.map(d => SELECTED.includes(d.stid) ? d.name : ''),
     marker: {
-      size: filtered.map(d => d.pareto ? 13 : 9),
+      size: filtered.map(d => SELECTED.includes(d.stid) ? 15 : (d.pareto ? 11 : 8)),
       symbol: filtered.map(d => d.pareto ? 'star' : 'circle'),
       color: filtered.map(d => d[cKey]),
       colorscale: cMeta.lower_is_good ? [[0,'#4caf82'],[0.5,'#e0c040'],[1,'#e05555']] : [[0,'#e05555'],[0.5,'#e0c040'],[1,'#4caf82']],
-      colorbar: { title: cMeta.label, tickfont: { color: '#8a8d9a' }, titlefont: { color: '#8a8d9a' } },
-      line: { width: filtered.map(d => d.pareto ? 1.2 : 0.5), color: filtered.map(d => d.pareto ? '#fff' : '#333') },
+      colorbar: { title: { text: cMeta.label, font: { color: '#8a8d9a', size: 10 } }, tickfont: { color: '#8a8d9a', size: 9 }, thickness: 10 },
+      line: {
+        width: filtered.map(d => SELECTED.includes(d.stid) ? 3 : (d.pareto ? 1.2 : 0.5)),
+        color: filtered.map(d => { const c = selColorOf(d.stid); return c ? c : (d.pareto ? '#fff' : '#333'); }),
+      },
     },
     type: 'scatter',
   };
   const layout = {
-    xaxis: { title: xMeta.label, color: '#8a8d9a', gridcolor: '#2a2d3a' },
-    yaxis: { title: yMeta.label, color: '#8a8d9a', gridcolor: '#2a2d3a' },
+    xaxis: { title: { text: xMeta.label, font: { size: 11 } }, color: '#8a8d9a', gridcolor: '#2a2d3a' },
+    yaxis: { title: { text: yMeta.label, font: { size: 11 } }, color: '#8a8d9a', gridcolor: '#2a2d3a' },
     paper_bgcolor: '#0f1117', plot_bgcolor: '#0f1117',
-    font: { color: '#e0e0e6' }, margin: { l: 60, r: 20, t: 20, b: 50 }, hovermode: 'closest',
+    font: { color: '#e0e0e6' }, margin: { l: 50, r: 10, t: 10, b: 44 }, hovermode: 'closest', showlegend: false,
   };
-  Plotly.newPlot('scatter-plot', [trace], layout, { responsive: true });
+  Plotly.react('scatter-plot', [baseTrace], layout, { responsive: true, displayModeBar: false });
+  const gd = document.getElementById('scatter-plot');
+  if (!gd._wbBound) {
+    gd._wbBound = true;
+    gd.on('plotly_click', e => { const stid = e.points[0].customdata; if (stid) toggleSelect(stid); });
+  }
 }
+function resizeScatter() { try { Plotly.Plots.resize('scatter-plot'); } catch (e) {} }
 
-function resizeScatter() { Plotly.Plots.resize('scatter-plot'); }
-
-// ---- Table ----
-let sortCol = 'overall';
-let sortAsc = true;
-
+// ============================================================
+//  Ranking table
+// ============================================================
+let sortCol = 'overall', sortAsc = true;
 function renderTable() {
-  const METRIC_META = getMetricMeta();
+  const META = getMetricMeta();
   const header = document.getElementById('table-header');
   header.innerHTML = TABLE_COLS.map(c => {
-    let cls = '';
-    if (c.key === sortCol) cls = sortAsc ? 'sorted-asc' : 'sorted-desc';
-    return `<th class="${cls}" data-key="${c.key}">${c.label}</th>`;
+    let cls = (c.key === 'name') ? 'name' : '';
+    if (c.key === sortCol) cls += (sortAsc ? ' sorted-asc' : ' sorted-desc');
+    return `<th class="${cls.trim()}" data-key="${c.key}" title="${(HELP[c.key]||'').replace(/"/g,'&quot;')}">${c.label}</th>`;
   }).join('');
-
   header.querySelectorAll('th').forEach(th => {
-    th.title = HELP[th.dataset.key] || '';
     th.addEventListener('click', () => {
       const key = th.dataset.key;
-      if (sortCol === key) { sortAsc = !sortAsc; } else { sortCol = key; sortAsc = true; }
+      if (sortCol === key) sortAsc = !sortAsc; else { sortCol = key; sortAsc = true; }
       renderTable();
     });
   });
 
-  const sorted = [...DATA].sort((a, b) => {
+  let rows = [...DATA];
+  if (document.getElementById('rank-selonly').checked) rows = rows.filter(d => SELECTED.includes(d.stid));
+  rows.sort((a, b) => {
     let av = a[sortCol], bv = b[sortCol];
     if (typeof av === 'string') return sortAsc ? av.localeCompare(bv) : bv.localeCompare(av);
     if (av == null) return 1; if (bv == null) return -1;
     return sortAsc ? av - bv : bv - av;
   });
 
-  document.getElementById('table-body').innerHTML = sorted.map(d => {
-    return '<tr>' + TABLE_COLS.map(c => {
+  document.getElementById('table-body').innerHTML = rows.map(d => {
+    const selIdx = SELECTED.indexOf(d.stid);
+    const sel = selIdx >= 0;
+    const style = sel ? ` style="--sel:${selColor(selIdx)}"` : '';
+    const cls = (sel ? 'selected' : '') + (HOVERED === d.stid ? ' hovered' : '');
+    return `<tr data-stid="${d.stid}" class="${cls.trim()}"${style}>` + TABLE_COLS.map(c => {
       let val = d[c.key];
       if (c.fmt) val = c.fmt(val);
-      else if (typeof val === 'number') { const meta = METRIC_META[c.key]; val = meta ? meta.fmt(val) : val.toFixed(2); }
-      let cls = '';
-      if (c.key === 'rank') cls = 'rank-cell';
-      if (c.key === 'overall' && d.overall < -3) cls = 'score-good';
-      if (c.key === 'overall' && d.overall > 3) cls = 'score-bad';
-      return `<td class="${cls}">${val}</td>`;
+      else if (typeof val === 'number') { const m = META[c.key]; val = m ? m.fmt(val) : val.toFixed(2); }
+      else if (val == null) val = '-';
+      const tcls = c.key === 'name' ? 'name' : (c.key === 'rank' ? 'rank-cell' : '');
+      return `<td class="${tcls}">${val}</td>`;
     }).join('') + '</tr>';
   }).join('');
+
+  document.querySelectorAll('#table-body tr').forEach(tr => {
+    tr.addEventListener('click', () => toggleSelect(tr.dataset.stid));
+    tr.addEventListener('mouseenter', () => setHover(tr.dataset.stid));
+    tr.addEventListener('mouseleave', () => setHover(null));
+  });
 }
 
-// ---- Init ----
-fetch('data.json')
-  .then(r => r.json())
-  .then(data => {
-    ALL_DATA = data;
-    // v2 config
-    V2_DEFAULTS_CACHE = { ...(data.v2_defaults || {}) };
-    v2weights = { ...(data.v2_defaults || {}) };
-    // Precompute v1 z-scores for both sources
-    ['solar', 'sunshine'].forEach(src => {
-      zScoreCache[src] = computeZScores(ALL_DATA[src]);
-    });
-    DATA = ALL_DATA[currentSource];
-    ANCHORS = (data.anchors && data.anchors[currentSource]) || {};
-    document.getElementById('model-note').textContent =
-      '飽和した冬floor + 春/秋レート + 梅雨。弱い軸が支配（floorとdeltaは交換不可）。';
-    applyWeights();
-    buildWeightPanel();
-    renderAll();
+// ============================================================
+//  Compare tab
+// ============================================================
+// --- solar geometry (deterministic from latitude + day-of-year) ---
+const D2R = Math.PI / 180, R2D = 180 / Math.PI;
+function declination(doy) { return 23.44 * Math.sin(D2R * 360 * (284 + doy) / 365); }
+function noonElevation(lat, doy) { return 90 - Math.abs(lat - declination(doy)); }
+function daylightHours(lat, doy) {
+  const dec = declination(doy);
+  let x = -Math.tan(D2R * lat) * Math.tan(D2R * dec);
+  if (x <= -1) return 24; if (x >= 1) return 0;
+  return 2 * R2D * Math.acos(x) / 15;
+}
+function smoothCircular(arr, w) {   // for the cyclic annual curve (Dec31 ↔ Jan1 are adjacent)
+  if (!arr) return null;
+  const n = arr.length, half = Math.floor(w / 2), out = new Array(n);
+  for (let i = 0; i < n; i++) {
+    let s = 0, c = 0;
+    for (let j = i - half; j <= i + half; j++) {
+      const k = ((j % n) + n) % n, v = arr[k];
+      if (v != null && !isNaN(v)) { s += v; c++; }
+    }
+    out[i] = c ? s / c : null;
+  }
+  return out;
+}
+function smoothEdge(arr, w) {   // non-cyclic (winter segment Nov1..Mar31 is not a loop)
+  if (!arr) return null;
+  const n = arr.length, half = Math.floor(w / 2), out = new Array(n);
+  for (let i = 0; i < n; i++) {
+    let s = 0, c = 0;
+    for (let j = Math.max(0, i - half); j <= Math.min(n - 1, i + half); j++) {
+      const v = arr[j];
+      if (v != null && !isNaN(v)) { s += v; c++; }
+    }
+    out[i] = c ? s / c : null;
+  }
+  return out;
+}
+
+const MONTH_DOY = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
+const MONTH_LBL = ['1','2','3','4','5','6','7','8','9','10','11','12'];
+const PLOT_BG = { paper_bgcolor: '#0f1117', plot_bgcolor: '#0f1117', font: { color: '#e0e0e6', size: 10 } };
+const PLOT_CFG = { responsive: true, displayModeBar: false };
+
+let compareDirty = true;
+function renderCompareLive() {
+  // parts that depend on weights: stat table (rank/score) + radar (k_floor feeds v2Desir)
+  if (!document.getElementById('pp-compare').classList.contains('active')) return;
+  buildCompareStatTable();
+  if (SELECTED.length && document.getElementById('cmp-radar')) drawRadar();
+}
+function renderCompare() {
+  compareDirty = true;
+  if (!document.getElementById('pp-compare').classList.contains('active')) return;
+  if (document.getElementById('rightpane').classList.contains('collapsed')) return;
+  compareDirty = false;
+  drawCompare();
+}
+
+function compareSelectedRows() { return SELECTED.map(rowByStid).filter(Boolean); }
+
+function drawCompare() {
+  const host = document.getElementById('cmp-content');
+  if (!SELECTED.length) {
+    host.innerHTML = `<div class="cmp-hint">地図・散布図・ランキングで<b>地点をクリック</b>すると、ここに選択地点が<b>重ねて</b>比較表示されます(複数選択可)。<br><br>
+      ・年周の日射/日照カーブ<br>・冬の連続曇天(実日別)<br>・v2の5軸内訳(なぜその順位か)<br>・太陽南中高度 / 昼の長さ<br><br>
+      下の「例: 松本/帯広/金沢を選択」で試せます。</div>`;
+    return;
+  }
+  host.innerHTML = `
+    <div class="cmp-section-title">比較表</div>
+    <div id="cmp-stat"></div>
+    <div class="cmp-section-title">年周カーブ <span class="cmp-sub" style="display:inline">(${SOURCE_META[currentSource].label}・平年値15日平滑)</span></div>
+    <div id="cmp-annual" class="cmp-chart tall"></div>
+    <div class="cmp-section-title">冬の連続曇天 <span class="cmp-sub" style="display:inline">(実日別1991-2020・各暦日に日照&lt;2hだった年の割合)</span></div>
+    <div id="cmp-dark" class="cmp-chart"></div>
+    <div class="cmp-section-title">v2 5軸の達成度 <span class="cmp-sub" style="display:inline">(外側ほど良い・なぜその順位か)</span></div>
+    <div id="cmp-radar" class="cmp-chart tall"></div>
+    <div class="cmp-section-title">太陽 南中高度 <span class="cmp-sub" style="display:inline">(緯度から計算・度)</span></div>
+    <div id="cmp-elev" class="cmp-chart"></div>
+    <div class="cmp-section-title">昼の長さ(可照時間) <span class="cmp-sub" style="display:inline">(緯度から計算・時間)</span></div>
+    <div id="cmp-daylight" class="cmp-chart"></div>`;
+  buildCompareStatTable();
+  drawAnnual();
+  drawDark();
+  drawRadar();
+  drawSolarGeometry();
+}
+
+function buildCompareStatTable() {
+  const host = document.getElementById('cmp-stat');
+  if (!host) return;
+  const rows = compareSelectedRows();
+  const META = getMetricMeta();
+  const STAT_ROWS = [
+    { key: 'rank', label: '順位 #' },
+    { key: 'overall', label: 'Score (低=良)' },
+    { key: 'risk_band', label: '冬リスク' },
+    { key: 'winter_floor', label: 'W.Floor (高=良)' },
+    { key: 'mean_val', label: 'Mean (高=明)' },
+    { key: 'dark_spell', label: '連続曇天d (低=良)' },
+    { key: 'winter_obs', label: '冬実日照h (高=良)' },
+    { key: 'amplitude', label: '年較差 (低=良)' },
+    { key: 'excess_tv', label: '梅雨/非季節 (低=良)' },
+    { key: 'spring_30d_gain', label: '春レート (低=良)' },
+    { key: 'autumn_30d_drop', label: '秋レート (低=良)' },
+    { key: 'interann_cv', label: '当たり外れ% (低=良)' },
+  ];
+  const head = '<tr><th></th>' + rows.map((d, i) =>
+    `<th><span class="dot" style="background:${selColor(SELECTED.indexOf(d.stid))}"></span>${d.name}</th>`).join('') + '</tr>';
+  const body = STAT_ROWS.map(sr => {
+    const cells = rows.map(d => {
+      let v = d[sr.key];
+      if (sr.key === 'risk_band') return v ? `<td><span class="band-${v}">${({green:'緑',yellow:'黄',red:'赤'})[v]}</span></td>` : '<td class="cmp-na">-</td>';
+      if (sr.key === 'rank') return `<td>${v}</td>`;
+      if (v == null || isNaN(v)) return '<td class="cmp-na">-</td>';
+      const m = META[sr.key];
+      return `<td>${m ? m.fmt(v) : (+v).toFixed(2)}</td>`;
+    }).join('');
+    return `<tr><td>${sr.label}</td>${cells}</tr>`;
+  }).join('');
+  host.innerHTML = `<table class="cmp"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+}
+
+function seriesTrace(stid, yvals, name, idx, extra) {
+  return Object.assign({
+    y: yvals, name, mode: 'lines',
+    line: { color: selColor(idx), width: 2 },
+    hovertemplate: `${name}: %{y}<extra></extra>`,
+  }, extra || {});
+}
+const AXIS_MONTH = { tickmode: 'array', tickvals: MONTH_DOY, ticktext: MONTH_LBL, color: '#8a8d9a', gridcolor: '#1f2230' };
+const LEGEND = { orientation: 'h', y: 1.18, x: 0, font: { size: 9 }, bgcolor: 'rgba(0,0,0,0)' };
+
+function drawAnnual() {
+  const key = SOURCE_META[currentSource].seriesKey;
+  const traces = [], missing = [];
+  SELECTED.forEach((stid, i) => {
+    const s = SERIES && SERIES.stations[stid];
+    const arr = s && s[key];
+    if (!arr) { missing.push((rowByStid(stid) || {}).name || stid); return; }
+    const x = arr.map((_, d) => d);
+    traces.push(Object.assign(seriesTrace(stid, smoothCircular(arr, 15), (rowByStid(stid)||{}).name || stid, i), { x }));
   });
+  const layout = Object.assign({
+    xaxis: AXIS_MONTH, yaxis: { title: { text: SOURCE_META[currentSource].unit, font: { size: 9 } }, color: '#8a8d9a', gridcolor: '#1f2230' },
+    margin: { l: 44, r: 8, t: 26, b: 24 }, legend: LEGEND, showlegend: true,
+    annotations: missing.length ? [{ text: `${missing.join(', ')}: この源の平年値なし`, showarrow: false, x: 0, y: 1, xref: 'paper', yref: 'paper', font: { color: '#e0a030', size: 9 }, xanchor: 'left' }] : [],
+  }, PLOT_BG);
+  Plotly.react('cmp-annual', traces, layout, PLOT_CFG);
+}
+
+function drawDark() {
+  if (!SERIES) return;
+  const wd = SERIES.meta.winter_days;
+  const n = wd.length;
+  // tick at month starts within Nov1..Mar31 ordering
+  const tvals = [], ttext = [];
+  wd.forEach((mmdd, i) => { if (mmdd.endsWith('-01')) { tvals.push(i); ttext.push(parseInt(mmdd.slice(0,2),10) + '月'); } });
+  const traces = [];
+  SELECTED.forEach((stid, i) => {
+    const s = SERIES.stations[stid];
+    const arr = s && s.wdark;
+    if (!arr) return;
+    traces.push(seriesTrace(stid, smoothEdge(arr.map(v => v == null ? null : v * 100), 7), (rowByStid(stid)||{}).name || stid, i,
+      { x: arr.map((_, d) => d), connectgaps: true }));
+  });
+  const layout = Object.assign({
+    xaxis: { tickmode: 'array', tickvals: tvals, ticktext: ttext, color: '#8a8d9a', gridcolor: '#1f2230' },
+    yaxis: { title: { text: 'P(日照<2h) %', font: { size: 9 } }, color: '#8a8d9a', gridcolor: '#1f2230', range: [0, 100] },
+    margin: { l: 44, r: 8, t: 8, b: 24 }, legend: LEGEND, showlegend: true,
+  }, PLOT_BG);
+  Plotly.react('cmp-dark', traces, layout, PLOT_CFG);
+}
+
+function drawRadar() {
+  const axes = V2_OBJ.map(o => V2_OBJ_LABEL[o]);
+  const traces = SELECTED.map((stid, i) => {
+    const d = rowByStid(stid);
+    if (!d) return null;
+    const des = v2Desir(d, ANCHORS, v2weights.k_floor);
+    const r = V2_OBJ.map(o => des[o]);
+    return {
+      type: 'scatterpolar', r: r.concat([r[0]]), theta: axes.concat([axes[0]]),
+      name: d.name, mode: 'lines', fill: 'toself',
+      line: { color: selColor(i) }, fillcolor: selColorA(i, 0.12),
+      opacity: 0.9, hovertemplate: '%{theta}: %{r:.2f}<extra>' + d.name + '</extra>',
+    };
+  }).filter(Boolean);
+  const layout = Object.assign({
+    polar: { radialaxis: { range: [0, 1], color: '#8a8d9a', gridcolor: '#2a2d3a', tickfont: { size: 8 } }, angularaxis: { color: '#8a8d9a', gridcolor: '#2a2d3a' }, bgcolor: '#0f1117' },
+    margin: { l: 30, r: 30, t: 26, b: 20 }, legend: LEGEND, showlegend: true,
+  }, PLOT_BG);
+  Plotly.react('cmp-radar', traces, layout, PLOT_CFG);
+}
+
+function drawSolarGeometry() {
+  const doys = []; for (let d = 0; d < 365; d++) doys.push(d);
+  const elevTraces = [], dayTraces = [];
+  SELECTED.forEach((stid, i) => {
+    const d = rowByStid(stid);
+    if (!d || d.lat == null) return;
+    const nm = `${d.name} (${d.lat.toFixed(1)}°)`;
+    elevTraces.push(seriesTrace(stid, doys.map(k => +noonElevation(d.lat, k + 1).toFixed(2)), nm, i, { x: doys }));
+    dayTraces.push(seriesTrace(stid, doys.map(k => +daylightHours(d.lat, k + 1).toFixed(3)), nm, i, { x: doys }));
+  });
+  Plotly.react('cmp-elev', elevTraces, Object.assign({
+    xaxis: AXIS_MONTH, yaxis: { title: { text: '度', font: { size: 9 } }, color: '#8a8d9a', gridcolor: '#1f2230' },
+    margin: { l: 40, r: 8, t: 8, b: 24 }, legend: LEGEND, showlegend: true,
+  }, PLOT_BG), PLOT_CFG);
+  Plotly.react('cmp-daylight', dayTraces, Object.assign({
+    xaxis: AXIS_MONTH, yaxis: { title: { text: '時間', font: { size: 9 } }, color: '#8a8d9a', gridcolor: '#1f2230' },
+    margin: { l: 40, r: 8, t: 8, b: 24 }, legend: LEGEND, showlegend: true,
+  }, PLOT_BG), PLOT_CFG);
+}
+
+// ============================================================
+//  Resize handling
+// ============================================================
+let resizeTimer = null;
+window.addEventListener('resize', () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => { map.invalidateSize(); resizeScatter(); renderCompare(); }, 150);
+});
+
+// ============================================================
+//  Init
+// ============================================================
+Promise.all([
+  fetch('data.json').then(r => r.json()),
+  fetch('series.json').then(r => r.json()).catch(() => null),
+]).then(([data, series]) => {
+  ALL_DATA = data;
+  SERIES = series;
+  V2_DEFAULTS_CACHE = { ...(data.v2_defaults || {}) };
+  v2weights = { ...(data.v2_defaults || {}) };
+  ['solar', 'sunshine'].forEach(src => { zScoreCache[src] = computeZScores(ALL_DATA[src]); });
+  DATA = ALL_DATA[currentSource];
+  ANCHORS = (data.anchors && data.anchors[currentSource]) || {};
+  document.getElementById('controls-note').textContent =
+    '飽和した冬floor + 春/秋レート + 梅雨。弱い軸が支配（floorとdeltaは交換不可）。スライダーはリアルタイム反映。';
+  applyWeights();
+  buildWeightPanel();
+  renderAll();
+  setTimeout(() => map.invalidateSize(), 100);
+});
 </script>
 </body>
 </html>
