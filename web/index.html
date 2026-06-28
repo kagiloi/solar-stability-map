@@ -288,8 +288,9 @@ footer a { color: var(--accent); text-decoration: none; }
 <!-- TABLE PANEL -->
 <div id="panel-table" class="panel">
   <div class="note-box">
-    Score が低い = 良い。<span class="pareto-star">★</span> = Pareto 最適（winter_floor↑ × total_variation↓ で非劣＝どちらかを犠牲にしないと改善できない候補）。
-    重みは上の「Score Weights」パネルで調整可（v2 の (a)/(b)/(c) はここを動かすだけ）。列見出しでソート。
+    Score が低い = 良い。<span class="pareto-star">★</span> = この地点より「冬も明るく、<b>かつ</b>1年も穏やか」な所が他に1つも無い候補
+    （＝明るさ⇔穏やかさのトレードオフの最前線。★が付かない地点は「両方とも上回る別地点」があり選ぶ理由が薄い）。
+    列見出しに<b>マウスを乗せると各列の説明</b>、右上の<b>❓ボタンで全指標の解説</b>。重みは上のパネルで調整可。列見出しでソート。
   </div>
   <div class="table-wrapper">
     <table id="ranking-table">
@@ -379,7 +380,7 @@ footer a { color: var(--accent); text-decoration: none; }
     <table>
       <tr><th>列</th><th>意味</th></tr>
       <tr><td>#</td><td>現在のスコアでの順位(1=最良)</td></tr>
-      <tr><td>★</td><td><b>Pareto最適</b>: 「冬の明るさ↑ × 年間変動↓」で非劣＝どちらかを犠牲にしないともう片方を改善できない地点</td></tr>
+      <tr><td>★</td><td><b>Pareto最適</b>: この地点より「冬も明るく、<b>かつ</b>1年も穏やか」な地点が他に1つも無い。明るさと穏やかさの<b>どちらかを諦めないとこれ以上良くできない</b>＝トレードオフの最前線。★が付かない地点は「両方とも上回る別地点」があるので選ぶ理由が薄い。<br>例: 帯広/釧路=穏やかさの端、熊谷/前橋=明るい冬の端、その間が★メニュー</td></tr>
       <tr><td>Station / Lat</td><td>地点名 / 緯度</td></tr>
     </table>
 
@@ -562,7 +563,7 @@ const TABLE_COLS = [
 // Hover descriptions for table-header columns (and reusable elsewhere).
 const HELP = {
   rank: '現在のスコアでの順位 (1=最良)',
-  pareto: '★=Pareto最適: 冬の明るさ↑ × 年間変動↓ で非劣(どちらかを犠牲にしないと改善不可)',
+  pareto: '★=この地点より「冬も明るく、かつ1年も穏やか」な地点が他に1つも無い、という地点(明るさ⇔穏やかさのトレードオフの最前線)',
   name: '地点名',
   overall: '総合スコア(低い=良い)。選択中モデル(v2/v1)で計算',
   score_v2: 'v2を既定重みで計算した固定参照値(スライダーで不変)',
