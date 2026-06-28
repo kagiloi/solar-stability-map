@@ -54,6 +54,18 @@
 
 **判断への影響**: NEDOは「独立な真値監査」ではなく「温度＋衛星を使うより良い推計での照合」。それでも盆地の best-available GHI なので、(B)を「盆地4地点を NEDO で取得し、日照ランキングと食い違うか確認」に具体化する価値はある。ただし**真に独立な高地GHIは依然として存在しない**（高地で実測する官署が無い）点は変わらず。
 
+## 実験結果（2026-06-28）：3系統の三角測量 + volatilityの限界
+
+NASA POWER(`power.larc.nasa.gov`)と NEDO METPV-20(`domessolar.infop.nedo.go.jp/appww/cgi-bin/download.cgi?...&p=<アメダス番号>`)は**この環境から取得可能**だった（NEDOの正ホストは `infoc` でなく `domessolar.infop`。CGIで `p=` を変えれば全地点DL可、生CSVは Shift-JIS）。NEDO生データはライセンス未確認のため repo 外（`data/nedo/` を gitignore）、派生指標のみ記録。
+
+**NASA POWER 検証（実測48点 vs 衛星, 年GHI）**: r=0.93・MAPE 3.4%・バイアス+0.2MJ＝全体は良好。**ただし高地で系統的に過小評価**（bias vs 標高 r=−0.36）。原因は**~100km格子が山岳を平均化**（長野の格子標高875m, 松本1188m）。さらに**諏訪・軽井沢・長野が同一値**＝**個別の盆地を区別できない**。→ NASAは「地域単位のLEVEL確認」には使えるが「盆地の細かい順位」「局所volatility」には使えない。
+
+**結論1：盆地の"明るい冬"は3系統で独立確認（堅い）**。NEDO METPV-20 冬GHI floor（実測47点中の順位）: 甲府 上位2% / 軽井沢・諏訪 15% / 飯田 17% / 松本 21%（長野40%）。日照ランキング(松本top10)とも、NASA地域GHI(中部内陸=冬明)とも一致。**NASAが松本を低く出したのは解像度アーティファクト**で、NEDO(地点解像度・気温考慮)が9.64で打ち消した。
+
+**結論2：NASA日別はlocal volatilityに不向き（calibration finding）**。実日別2010-2020の冬volatility指標（年々CV・日々|Δ|・連続曇天）は群間で**ほぼフラット**＝~100km格子の平均化が**局所の日々変動を平滑化して消している**。弱い信号として 道東の日々|Δ|最小(帯広1.90)・日本海の年々CV最大(金沢6.1%)・日本海の冬GHI最低(6.4) は出た。NEDO代表年(地点解像度)は松本で excess_tv=105 と実天候の大変動を保持しており、NASAの平滑とは対照的。
+
+**→ 次フェーズ（delta仮説の本検証）**: 局所volatilityは**station解像度の実日別**が必須。**JMA obsdl の日別観測値(1991-2020)**を crawl するのが本命（NASAでは原理的に不可、平年値では消える）。LEVEL/冬明るさは NASA+NEDO+日照で確定済み、残るは「日々の急変が効くか」の station-daily 検証。
+
 ## References
 
 - A–P日本係数: MRI <https://www.jstage.jst.go.jp/article/mripapers1950/17/3/17_190/_pdf/-char/ja>

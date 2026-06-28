@@ -2,3 +2,6 @@
 __pycache__/
 *.pyc
 .DS_Store
+
+# NEDO METPV-20 raw CSVs — redistribution license unconfirmed; keep derived metrics only
+data/nedo/
