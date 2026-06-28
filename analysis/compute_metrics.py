@@ -376,6 +376,14 @@ V2_DEFAULTS: dict[str, float] = {
     "rho": 0.1,           # augmented-Chebyshev tie-breaker (avoids weak-Pareto optima)
 }
 
+# Winter dark-spell risk bands (from REAL daily obs, analysis/dark_spell_all.py).
+# Pre-registered, mechanism-anchored on the worst-winter longest consecutive
+# sub-2h-sunshine run (CVaR80, days). This is an OVERLAY / red flag, NOT a score
+# weight — it is ~77% redundant with winter_floor (r=-0.88); see ADR 006.
+DARK_GREEN_MAX: float = 5.0   # <=5 day worst spells = low risk
+DARK_RED_MIN: float = 10.0    # >=10 day worst spells = high risk (Japan Sea etc.)
+DARK_SPELL_CSV = OUT_DIR / "dark_spell_metrics.csv"
+
 # Each objective: (Metrics field, direction). direction "high" = more is better, "low" = less is better.
 _V2_FIELDS: dict[str, tuple[str, str]] = {
     "floor": ("winter_floor", "high"),
@@ -455,6 +463,29 @@ def pareto_floor_vs_tv(results: list[tuple[StationMeta, Metrics]]) -> list[bool]
     return flags
 
 
+def load_dark_spell() -> dict[str, dict]:
+    """Load winter dark-spell metrics (real daily obs) keyed by stid, if available."""
+    if not DARK_SPELL_CSV.exists():
+        return {}
+    out: dict[str, dict] = {}
+    with open(DARK_SPELL_CSV, encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            try:
+                cvar = float(r["spell_cvar80_t2"])
+                winter = float(r["winter_mean_h"])
+                cv = float(r["interannual_cv_pct"])
+            except (ValueError, KeyError):
+                continue
+            band = "green" if cvar <= DARK_GREEN_MAX else ("red" if cvar >= DARK_RED_MIN else "yellow")
+            out[r["stid"]] = {
+                "dark_spell": round(cvar, 1),
+                "winter_obs": round(winter, 2),
+                "interann_cv": round(cv, 1),
+                "risk_band": band,
+            }
+    return out
+
+
 def export_web_json(
     sun_results: list[tuple[StationMeta, Metrics]],
     solar_results: list[tuple[StationMeta, Metrics]],
@@ -470,6 +501,7 @@ def export_web_json(
         "winter_floor", "summer_ceiling", "spring_30d_gain", "autumn_30d_drop",
         "spring_rise_days", "autumn_fall_days", "trough_day", "peak_day",
     ]
+    dark = load_dark_spell()  # winter dark-spell overlay (real daily obs), keyed by stid
 
     def build(results: list[tuple[StationMeta, Metrics]]) -> tuple[list[dict], dict]:
         clean = [(meta, m) for meta, m in results if meta.latitude is not None]
@@ -502,6 +534,12 @@ def export_web_json(
                 row[f"d_{obj}"] = round(desir[obj], 4)
             row["score_v2"] = round(v2_score(desir, V2_DEFAULTS), 4)
             row["pareto"] = bool(pareto[i])
+            # Winter dark-spell OVERLAY (real daily obs; red flag, not in the score)
+            d = dark.get(meta.stid)
+            row["dark_spell"] = d["dark_spell"] if d else None
+            row["winter_obs"] = d["winter_obs"] if d else None
+            row["interann_cv"] = d["interann_cv"] if d else None
+            row["risk_band"] = d["risk_band"] if d else None
             rows.append(row)
         return rows, anchors
 

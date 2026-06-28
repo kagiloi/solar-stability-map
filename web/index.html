@@ -52,6 +52,9 @@ header p { color: var(--text-dim); font-size: 0.9rem; margin-top: 4px; }
 .model-btn:hover { color: var(--text); border-color: var(--text-dim); }
 .model-btn.active { color: var(--bg); background: var(--good); border-color: var(--good); font-weight: 600; }
 .pareto-star { color: #e0c040; }
+.band-green { color: #4caf82; }
+.band-yellow { color: #e0c040; }
+.band-red { color: #e05555; font-weight: 600; }
 
 .tabs { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
 .tab {
@@ -223,6 +226,8 @@ footer a { color: var(--accent); text-decoration: none; }
       <option value="winter_floor">Winter Floor (high=bright)</option>
       <option value="total_variation">Total Variation Σ|Δ| (low=calm)</option>
       <option value="excess_tv">Excess TV 非季節変動 (low=good)</option>
+      <option value="dark_spell">冬の連続曇天 [実日別] (low=good)</option>
+      <option value="winter_obs">冬の実日照h [実日別] (high=good)</option>
       <option value="amplitude">Amplitude (low=stable)</option>
       <option value="mean_val" id="opt-mean-val">Mean (unit)</option>
       <option value="spring_30d_gain">Spring 30d Gain (low=gentle)</option>
@@ -303,6 +308,13 @@ footer a { color: var(--accent); text-decoration: none; }
       <tr><td style="text-align:left;">amplitude</td><td style="text-align:left;">(P95-P05)/mean of smoothed curve</td><td style="text-align:left;">Low</td></tr>
       <tr><td style="text-align:left;">mean_val</td><td style="text-align:left;">Annual average value</td><td style="text-align:left;">High</td></tr>
     </table>
+    <div class="note-box" style="border-left-color:#e05555;">
+      <strong>冬の連続曇天 red-flag（overlay, スコア外）</strong>: 実観測の日別日照1991-2020から算出した
+      <code>dark_spell</code>＝悪い冬の最長連続曇天日数(CVaR80, 日照&lt;2h)。<span class="band-green">緑</span>≤5日 /
+      <span class="band-yellow">黄</span> / <span class="band-red">赤</span>≥10日。平年値もNASA衛星(~100km格子)も平均化で消す「連続曇天」を station 解像度で捉える。
+      <strong>スコアの重みには入れない</strong>（winter_floorと r=−0.88 で約77%重複＝二重計上を避け、red-flag表示に留める）。
+      赤＝日本海側・北海道西岸・冬曇りの南島(冬2-3h・最長2週間連続無日照)。詳細は <code>docs/experiments/2026-06-28_daily-volatility.md</code> / ADR 006。
+    </div>
     <h3 style="font-size:1rem;margin:20px 0 8px;">Limitations</h3>
     <ul style="color:var(--text-dim);font-size:0.85rem;padding-left:20px;">
       <li>平年値 + 15日平滑のため <code>total_variation</code> は「実生活の変動」ではなく<strong>「季節傾き + 梅雨構造」</strong>。総観スケール（連続曇天）・年々変動は捕捉できない（真の変動には日別生データが必要）。</li>
@@ -407,6 +419,9 @@ function getMetricMeta() {
     ramp:            { label: 'Ramp', lower_is_good: true, fmt: v => v.toFixed(4) },
     total_variation: { label: 'Total Variation Σ|Δ|', lower_is_good: true, fmt: v => v.toFixed(2) },
     excess_tv:       { label: 'Excess TV (非季節変動)', lower_is_good: true, fmt: v => v.toFixed(2) },
+    dark_spell:      { label: '冬の連続曇天 [日] (実日別)', lower_is_good: true, fmt: v => v == null ? '-' : v.toFixed(1) },
+    winter_obs:      { label: '冬の実日照 [h] (実日別)', lower_is_good: false, fmt: v => v == null ? '-' : v.toFixed(1) },
+    interann_cv:     { label: '冬の当たり外れ [%] (実日別)', lower_is_good: true, fmt: v => v == null ? '-' : v.toFixed(1) },
     winter_floor:    { label: `Winter Floor (${u})`, lower_is_good: false, fmt: v => v.toFixed(2) },
     summer_ceiling:  { label: `Summer Ceiling (${u})`, lower_is_good: false, fmt: v => v.toFixed(2) },
     spring_30d_gain: { label: 'Spring 30d Gain', lower_is_good: true, fmt: v => v.toFixed(2) },
@@ -424,6 +439,8 @@ const TABLE_COLS = [
   { key: 'mean_val', label: 'Mean' },
   { key: 'amplitude', label: 'Ampl.' },
   { key: 'winter_floor', label: 'W.Floor' },
+  { key: 'risk_band', label: '冬リスク', fmt: v => v ? `<span class="band-${v}">${({green:'緑',yellow:'黄',red:'赤'})[v]}</span>` : '-' },
+  { key: 'dark_spell', label: '連続曇天d', fmt: v => v == null ? '-' : v.toFixed(1) },
   { key: 'total_variation', label: 'TV Σ|Δ|' },
   { key: 'excess_tv', label: 'exTV' },
   { key: 'spring_30d_gain', label: 'Spr.Gain' },
@@ -684,7 +701,7 @@ function renderMap() {
   const meta = METRIC_META[metric];
   const sm = SOURCE_META[currentSource];
   const filtered = DATA.filter(d => d.lat != null);
-  const vals = filtered.map(d => d[metric]);
+  const vals = filtered.map(d => d[metric]).filter(v => v != null && !isNaN(v));
   const min = Math.min(...vals);
   const max = Math.max(...vals);
 
@@ -692,7 +709,8 @@ function renderMap() {
   mapMarkers = [];
 
   filtered.forEach(d => {
-    const color = colorScale(d[metric], min, max, meta.lower_is_good);
+    const color = (d[metric] == null || isNaN(d[metric]))
+      ? '#555' : colorScale(d[metric], min, max, meta.lower_is_good);
     const marker = L.circleMarker([d.lat, d.lon], {
       radius: d.pareto ? 9 : 7, fillColor: color,
       color: d.pareto ? '#fff' : '#222', weight: d.pareto ? 2 : 1, fillOpacity: 0.85,
