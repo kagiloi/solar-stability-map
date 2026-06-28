@@ -390,7 +390,12 @@ footer a { color: var(--accent); text-decoration: none; }
       <tr><td>score_v2</td><td>v2を「生成時の既定重み」で計算した固定参照値(スライダーを動かしても不変)</td></tr>
       <tr><td>v1 Stability / Transition</td><td>旧v1(線形z和)の内訳: 安定性 / 季節遷移パート</td></tr>
     </table>
-    <p class="note">v2の作り方: 各指標を絶対基準で desirability d∈[0,1](1=理想)に変換 → <code>D = max&#8202;wⱼ(1−dⱼ) + ρ·Σ</code>(=一番ダメな軸が支配する<b>非補償</b>。明るさと変動を交換不可にする)。</p>
+    <p class="note">
+      <b>v2の作り方</b>: 各地点の各軸を「達成度 <b>d</b>(0〜1, 1=理想)」に変換 → スコア = 各軸の「不足 = 重み<b>w</b>×(1−d)」のうち<b>一番大きい軸</b>で決まる(=一番の弱点が支配する<b>非補償</b>。明るさを変動の小ささで買い戻せない)。
+      ここで <b>w は下⑥のスライダー</b>(0〜3の重視度。大=その軸を強く要求)、<b>d はデータから自動計算</b>(スライダーではない)。
+      <b>v2の重みにマイナスは無い</b>(全部「どれだけ要求するか」＝大きいほど罰を強める)。
+      ／ 参考: 旧v1モデルは重みが符号付きで <span class="band-red">＋=罰</span> / <span class="band-green">−=報酬</span> / 0=無視。
+    </p>
 
     <h3>③ レベル指標(明るさ。高い=明るい)</h3>
     <table>
@@ -482,13 +487,13 @@ let v2weights = {};          // initialized from data.v2_defaults
 let V2_DEFAULTS_CACHE = {};  // pristine copy of data.v2_defaults (for Reset)
 
 const V2_FIELDS = [
-  { key: 'w_floor',     label: 'Winter floor',       min: 0, max: 3,   step: 0.1,  desc: '冬の明るさの重み（飽和ペナルティ）' },
-  { key: 'w_spring',    label: 'Spring rate',        min: 0, max: 3,   step: 0.1,  desc: '春の急な立ち上がりを罰（Bauer: 最良エビデンス）' },
-  { key: 'w_autumn',    label: 'Autumn rate',        min: 0, max: 3,   step: 0.1,  desc: '秋の急な落ち込みを罰（うつ側）' },
-  { key: 'w_excessTV',  label: 'Excess TV 非季節',   min: 0, max: 3,   step: 0.1,  desc: '非季節的な往復を罰（時期非依存・固定窓なし。梅雨/曇天連続など）' },
-  { key: 'w_amplitude', label: 'Amplitude',          min: 0, max: 3,   step: 0.1,  desc: '季節振幅を罰' },
-  { key: 'k_floor',     label: 'Floor saturation k', min: 0, max: 6,   step: 0.1,  desc: '大きいほど暗い冬を急に罰し、明るい側は飽和' },
-  { key: 'rho',         label: 'Tie-breaker ρ',      min: 0, max: 0.5, step: 0.01, desc: 'augmented Chebyshev の微小線形項' },
+  { key: 'w_floor',     label: '冬の明るさ 重み',   min: 0, max: 3,   step: 0.1,  desc: '「冬の明るさ(W.Floor)」をどれだけ重視するか。大きいほど、冬が暗い地点を強く下げる' },
+  { key: 'w_spring',    label: '春レート 重み',     min: 0, max: 3,   step: 0.1,  desc: '「春に急に明るくなる地点」をどれだけ嫌うか(急上昇=躁・早期発症リスク)。大=罰を強める' },
+  { key: 'w_autumn',    label: '秋レート 重み',     min: 0, max: 3,   step: 0.1,  desc: '「秋に急に暗くなる地点」をどれだけ嫌うか(急降下=うつ側)。大=罰を強める' },
+  { key: 'w_excessTV',  label: '梅雨/非季節 重み',  min: 0, max: 3,   step: 0.1,  desc: '「梅雨など季節外れの変動が大きい地点」をどれだけ嫌うか。大=罰を強める' },
+  { key: 'w_amplitude', label: '年較差 重み',       min: 0, max: 3,   step: 0.1,  desc: '「夏と冬の差(年較差)が大きい地点」をどれだけ嫌うか。大=罰を強める' },
+  { key: 'k_floor',     label: '冬floorの効き方 k', min: 0, max: 6,   step: 0.1,  desc: '冬の明るさの評価カーブの形。大きいほど「暗い冬を急に悪く」評価し、十分明るい所はそれ以上加点しない(頭打ち)' },
+  { key: 'rho',         label: '同点の微調整 ρ',    min: 0, max: 0.5, step: 0.01, desc: '基本いじらなくてOK(0付近)。普段スコアは「一番ダメな1軸」だけで決まるが、ρを上げると「全軸の合計」も少し効いて同点を割る' },
 ];
 
 const V2_OBJ = ['floor', 'spring', 'autumn', 'excessTV', 'amplitude'];
@@ -683,11 +688,13 @@ function updateFormulaPreview() {
   const el = document.getElementById('formula-preview');
   if (scoringModel === 'v2') {
     const w = v2weights;
-    const wline = V2_OBJ.map(o => `w_${o}=${(w['w_' + o]).toFixed(2)}`).join('   ');
+    const NM = { floor: '\u51AC\u660E\u308B\u3055', spring: '\u6625\u30EC\u30FC\u30C8', autumn: '\u79CB\u30EC\u30FC\u30C8', excessTV: '\u6885\u96E8/\u975E\u5B63\u7BC0', amplitude: '\u5E74\u8F03\u5DEE' };
+    const wline = V2_OBJ.map(o => `${NM[o]}=${(w['w_' + o]).toFixed(2)}`).join('\u3000 ');
     el.innerHTML =
-      '<b>score_v2</b> = max<sub>j</sub>[ w<sub>j</sub>\u00B7(1\u2212d<sub>j</sub>) ] + \u03C1\u00B7\u03A3 w<sub>j</sub>\u00B7(1\u2212d<sub>j</sub>)'
-      + '   <span class="fw-zero">(\u4F4E\u3044\uFF1D\u826F / \u5F31\u3044\u8EF8\u304C\u652F\u914D\uFF1D\u975E\u88DC\u511F)</span>\n'
-      + `d_floor \u306F\u98FD\u548C k=${w.k_floor.toFixed(1)},  \u03C1=${w.rho.toFixed(2)}\n` + wline;
+      '<span class="fw-zero">\u91CD\u307F = \u5404\u8EF8\u306E\u300C\u91CD\u8996\u5EA6\u300D(0\u301C3)\u3002\u5927\u304D\u3044\u307B\u3069\u305D\u306E\u8EF8\u3092\u5F37\u304F\u8981\u6C42\u3057\u3001\u6E80\u305F\u3055\u306A\u3044\u5730\u70B9\u3092\u4E0B\u3052\u308B\u3002<b>v2\u306B\u30DE\u30A4\u30CA\u30B9(\u5831\u916C)\u306F\u7121\u3057</b>\u3002</span>\n'
+      + '<b>score_v2</b>(\u4F4E\u3044=\u826F\u3044) = \u5404\u8EF8\u306E\u300C\u4E0D\u8DB3 = \u91CD\u307F\u00D7(1\u2212\u9054\u6210\u5EA6)\u300D\u306E\u3046\u3061 <b>\u4E00\u756A\u5927\u304D\u3044\u8EF8</b>\u3067\u6C7A\u307E\u308B + \u03C1\u3067\u5FAE\u8ABF\u6574\n'
+      + '<span class="fw-zero">\u3000\u9054\u6210\u5EA6 = \u5404\u5730\u70B9\u304C\u305D\u306E\u8EF8\u3067\u3069\u308C\u3060\u3051\u7406\u60F3\u306B\u8FD1\u3044\u304B(0\u301C1, \u30C7\u30FC\u30BF\u304B\u3089\u81EA\u52D5\u8A08\u7B97) / \u4E00\u756A\u306E\u5F31\u70B9\u304C\u652F\u914D = \u660E\u308B\u3055\u3092\u5909\u52D5\u306E\u5C0F\u3055\u3055\u3067\u8CB7\u3044\u623B\u305B\u306A\u3044(\u975E\u88DC\u511F)</span>\n'
+      + `floor\u98FD\u548C k=${w.k_floor.toFixed(1)}\u3000\u03C1=${w.rho.toFixed(2)}\u3000\u3000` + wline;
     return;
   }
   const parts = [];
@@ -698,7 +705,11 @@ function updateFormulaPreview() {
     const cls = w > 0 ? 'fw-pos' : 'fw-neg';
     parts.push(`<span class="${cls}">${sign}${w.toFixed(1)}</span>\u00B7z(${f.key})`);
   });
-  el.innerHTML = '<b>overall</b> = ' + parts.join('  ');
+  el.innerHTML =
+    '<span class="fw-zero">\u91CD\u307F: </span><span class="fw-pos">\uFF0B(\u8D64)=\u305D\u306E\u6307\u6A19\u304C\u5927\u304D\u3044\u307B\u3069\u7F70(\u30B9\u30B3\u30A2\u60AA\u5316)</span>'
+    + '<span class="fw-zero">\u3000/\u3000</span><span class="fw-neg">\u2212(\u7DD1)=\u5927\u304D\u3044\u307B\u3069\u5831\u916C(\u826F\u5316)</span>'
+    + '<span class="fw-zero">\u3000/\u30000=\u7121\u8996</span>\n'
+    + '<b>overall</b>(\u4F4E\u3044=\u826F\u3044) = ' + parts.join('  ');
 }
 
 function setWeights(newWeights) {
