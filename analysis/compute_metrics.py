@@ -6,6 +6,8 @@ outputs CSVs, scatter plots, validation correlations, and ranked candidates.
 """
 
 import csv
+import json
+import math
 import sqlite3
 import sys
 from dataclasses import dataclass, fields
@@ -29,6 +31,7 @@ if _jp_font:
 
 DB_PATH = Path(__file__).resolve().parent.parent / "data" / "jma_solar.db"
 OUT_DIR = Path(__file__).resolve().parent.parent / "data"
+WEB_DIR = Path(__file__).resolve().parent.parent / "web"
 
 # Primary metric fields used in scoring
 PRIMARY_FIELDS: list[str] = [
@@ -58,6 +61,8 @@ class Metrics:
     mean_val: float
     amplitude: float          # (P95-P05)/mean of smoothed
     ramp: float               # mean(abs(diff(smoothed)))
+    total_variation: float    # sum(abs(diff(smoothed))) over the year (= ramp*365); "整流済み" total swing
+    excess_tv: float          # total_variation - 2*(max-min): non-seasonal reversals (e.g. 梅雨 plateau)
 
     # Primary: Seasonal
     winter_floor: float       # mean smoothed Dec15-Feb15
@@ -140,6 +145,7 @@ def compute_metrics(values_365: np.ndarray) -> Metrics:
     # Daily diffs of smoothed (circular)
     diffs = np.diff(np.concatenate([smoothed, smoothed[:1]]))
     ramp = float(np.mean(np.abs(diffs)))
+    total_variation = float(np.sum(np.abs(diffs)))  # = ramp * 365
 
     # Winter floor (Dec15-Feb15)
     winter_days = _doy_range("12-15", "02-15")
@@ -155,6 +161,11 @@ def compute_metrics(values_365: np.ndarray) -> Metrics:
     val_min = float(smoothed[trough_day])
     val_max = float(smoothed[peak_day])
     val_range = val_max - val_min
+
+    # Excess total variation: how much the curve "doubles back" beyond the unavoidable
+    # single seasonal sweep (a clean one-peak year has TV == 2*range). Captures 梅雨-type
+    # plateaus / mid-season reversals that the 4 hand-picked transition metrics miss.
+    excess_tv = max(total_variation - 2.0 * val_range, 0.0)
 
     # Spring: trough -> peak
     spring_indices = _circular_range(trough_day, peak_day)
@@ -202,6 +213,8 @@ def compute_metrics(values_365: np.ndarray) -> Metrics:
         mean_val=round(mean_val, 3),
         amplitude=round(amplitude, 4),
         ramp=round(ramp, 4),
+        total_variation=round(total_variation, 3),
+        excess_tv=round(excess_tv, 3),
         winter_floor=round(winter_floor, 3),
         summer_ceiling=round(summer_ceiling, 3),
         spring_30d_gain=round(spring_30d_gain, 3),
@@ -249,6 +262,13 @@ def load_station_data(
     result: dict[str, tuple[StationMeta, np.ndarray]] = {}
     skipped: list[str] = []
     for stid, (meta, doy_dict) in stations.items():
+        # Stage-0 data hygiene (centralized so every artifact — CSVs, rankings,
+        # validation, web export — sees the same cleaned station universe):
+        # drop stations with no latitude (e.g. 昭和基地 / Antarctica), whose
+        # Southern-Hemisphere / polar seasonal cycle breaks every metric.
+        if meta.latitude is None:
+            skipped.append(f"{stid} ({meta.name}, no latitude)")
+            continue
         if len(doy_dict) != 365:
             skipped.append(f"{stid} ({meta.name}, {len(doy_dict)} days)")
             continue
@@ -318,6 +338,187 @@ def compute_overall_scores(
     )
     overall = stability + transition
     return stability, transition, overall
+
+
+# ---------------------------------------------------------------------------
+# Phase 2 v2 scoring — science-grounded, absolute-anchored, non-compensatory.
+# Rationale and citations: docs/adr/004_phase2-scoring-v2.md
+#   - winter_floor: saturating (concave) reward, NOT a hard gate (Zeitzer 2000:
+#     circadian dose-response saturates; no population "cliff" for winter light).
+#   - spring rate (spring_30d_gain): Tier-1 penalty — strongest patient-outcome
+#     evidence that *rate of change* matters (Bauer multi-site, PMID 28722128).
+#   - autumn rate (autumn_30d_drop): Tier-1b, weighted below spring.
+#   - excess_tv / amplitude: Tier-2 (weak direct evidence) — exploratory low weight.
+#   - aggregation: augmented weighted Chebyshev (weak axis dominates = non-compensatory),
+#     so "bright-enough winter AND low delta" cannot be traded off — but without a cliff.
+# (a)/(b)/(c) priorities are the SAME formula with different weights (tune in the web UI).
+# ---------------------------------------------------------------------------
+
+# Livability filter: stations that are not realistic permanent-residence candidates.
+# Applied to RANKINGS/shortlist only, AFTER anchoring (so it drops rows from the ranking
+# but never re-derives the v2 anchors — see compute_v2_anchors / ADR 004). The full
+# metric catalogue (station_metrics_*.csv) keeps every station.
+#   s47991 南鳥島: no civilian residence (JMSDF/JCG personnel only).
+# Inhabited-but-remote islands (父島 s47971, 南大東 s47945, etc.) are kept; add them here
+# if medical access becomes a hard criterion.
+LIVABILITY_EXCLUDE: set[str] = {"s47991"}
+
+V2_OBJECTIVES: list[str] = ["floor", "spring", "autumn", "excessTV", "amplitude"]
+
+# Option (a) "balanced" defaults.
+V2_DEFAULTS: dict[str, float] = {
+    "w_floor": 1.0,
+    "w_spring": 1.0,      # Tier 1: best-evidenced "delta" (Bauer spring-insolation-rate)
+    "w_autumn": 0.7,      # Tier 1b: depression-side, mechanistic; below spring per the science
+    "w_excessTV": 0.3,    # Tier 2: 梅雨 plateau / non-seasonal reversals (weak direct evidence)
+    "w_amplitude": 0.3,   # Tier 2: seasonal swing
+    "k_floor": 2.5,       # winter_floor saturation; k->0 linear, larger = more concave (dark end matters more)
+    "rho": 0.1,           # augmented-Chebyshev tie-breaker (avoids weak-Pareto optima)
+}
+
+# Each objective: (Metrics field, direction). direction "high" = more is better, "low" = less is better.
+_V2_FIELDS: dict[str, tuple[str, str]] = {
+    "floor": ("winter_floor", "high"),
+    "spring": ("spring_30d_gain", "low"),
+    "autumn": ("autumn_30d_drop", "low"),
+    "excessTV": ("excess_tv", "low"),
+    "amplitude": ("amplitude", "low"),
+}
+
+
+def compute_v2_anchors(
+    results: list[tuple[StationMeta, Metrics]], lo_pct: float = 5.0, hi_pct: float = 95.0
+) -> dict[str, list[float]]:
+    """[lo, hi] anchors per objective from the 5th/95th percentile of `results`.
+
+    These are *generation-frozen*, not physically absolute: they are derived from the
+    station set passed in. Within the app they are fixed (baked into data.json), so
+    sliding weights or hiding rows never re-anchors — that is the property z-scores lack.
+    But they DO shift if the underlying station universe changes. IMPORTANT: always pass
+    the FULL cleaned set here (never a candidate/livability-filtered subset), so adding a
+    downstream filter only drops rows from the ranking, not from the anchoring. For a
+    stable JMA-normals dataset this is sufficient; a future hardening is to check in
+    fixed anchor constants. See docs/adr/004_phase2-scoring-v2.md.
+    """
+    anchors: dict[str, list[float]] = {}
+    for obj, (field, _dir) in _V2_FIELDS.items():
+        vals = np.array([getattr(m, field) for _, m in results], dtype=float)
+        anchors[obj] = [float(np.percentile(vals, lo_pct)), float(np.percentile(vals, hi_pct))]
+    return anchors
+
+
+def _clip01(x: float) -> float:
+    return max(0.0, min(1.0, x))
+
+
+def _saturate(n: float, k: float) -> float:
+    """Concave saturating map [0,1] -> [0,1]; k>0 emphasizes the low (dark) end."""
+    if abs(k) < 1e-9:
+        return n
+    return (1.0 - math.exp(-k * n)) / (1.0 - math.exp(-k))
+
+
+def v2_desirabilities(
+    m: Metrics, anchors: dict[str, list[float]], k_floor: float
+) -> dict[str, float]:
+    """Map each objective to a desirability in [0, 1] (1 = ideal) using absolute anchors."""
+    desir: dict[str, float] = {}
+    for obj, (field, direction) in _V2_FIELDS.items():
+        lo, hi = anchors[obj]
+        n = _clip01((getattr(m, field) - lo) / (hi - lo)) if hi > lo else 0.0
+        if obj == "floor":
+            desir[obj] = _saturate(n, k_floor)          # high & saturating
+        elif direction == "high":
+            desir[obj] = n
+        else:
+            desir[obj] = 1.0 - n                         # low is better
+    return desir
+
+
+def v2_score(desir: dict[str, float], params: dict[str, float]) -> float:
+    """Augmented weighted Chebyshev distance to the ideal point. Lower = better."""
+    gaps = [params[f"w_{obj}"] * (1.0 - desir[obj]) for obj in V2_OBJECTIVES]
+    return max(gaps) + params["rho"] * sum(gaps)
+
+
+def pareto_floor_vs_tv(results: list[tuple[StationMeta, Metrics]]) -> list[bool]:
+    """Non-dominated flag on the headline 2-axis tradeoff: winter_floor↑ × total_variation↓."""
+    pts = [(m.winter_floor, m.total_variation) for _, m in results]
+    flags: list[bool] = []
+    for i, (fi, ti) in enumerate(pts):
+        dominated = any(
+            fj >= fi and tj <= ti and (fj > fi or tj < ti)
+            for j, (fj, tj) in enumerate(pts)
+            if j != i
+        )
+        flags.append(not dominated)
+    return flags
+
+
+def export_web_json(
+    sun_results: list[tuple[StationMeta, Metrics]],
+    solar_results: list[tuple[StationMeta, Metrics]],
+    path: Path,
+) -> None:
+    """Write web/data.json: v1 (linear z-sum) + v2 (non-compensatory) fields, per source.
+
+    Stations without latitude (e.g. 昭和基地 / Antarctica) are excluded — their
+    Southern-Hemisphere / polar seasonal cycle breaks every metric's assumptions.
+    """
+    v1_keys = [
+        "mean_val", "amplitude", "ramp", "total_variation", "excess_tv",
+        "winter_floor", "summer_ceiling", "spring_30d_gain", "autumn_30d_drop",
+        "spring_rise_days", "autumn_fall_days", "trough_day", "peak_day",
+    ]
+
+    def build(results: list[tuple[StationMeta, Metrics]]) -> tuple[list[dict], dict]:
+        clean = [(meta, m) for meta, m in results if meta.latitude is not None]
+        # Anchors from the FULL cleaned set (before livability filter) so dropping
+        # non-residential stations never re-anchors the desirabilities.
+        anchors = compute_v2_anchors(clean)
+        # Candidates = livable subset; everything ranked/displayed is computed on these.
+        candidates = [(meta, m) for meta, m in clean if meta.stid not in LIVABILITY_EXCLUDE]
+        # v1 scores (linear z-sum) for parity with the existing UI
+        z = compute_z_scores(candidates)
+        stability, transition, overall = compute_overall_scores(z)
+        pareto = pareto_floor_vs_tv(candidates)
+        order = np.argsort(overall)  # rank by v1 overall (UI re-ranks on weight change)
+        rank_of = {idx: r + 1 for r, idx in enumerate(order)}
+
+        rows: list[dict] = []
+        for i, (meta, m) in enumerate(candidates):
+            desir = v2_desirabilities(m, anchors, V2_DEFAULTS["k_floor"])
+            row: dict = {
+                "rank": rank_of[i],
+                "stid": meta.stid, "name": meta.name,
+                "lat": meta.latitude, "lon": meta.longitude, "prid": meta.prid,
+                "overall": round(float(overall[i]), 3),
+                "stability": round(float(stability[i]), 3),
+                "transition": round(float(transition[i]), 3),
+            }
+            for k in v1_keys:
+                row[k] = getattr(m, k)
+            for obj in V2_OBJECTIVES:
+                row[f"d_{obj}"] = round(desir[obj], 4)
+            row["score_v2"] = round(v2_score(desir, V2_DEFAULTS), 4)
+            row["pareto"] = bool(pareto[i])
+            rows.append(row)
+        return rows, anchors
+
+    sun_rows, sun_anchors = build(sun_results)
+    solar_rows, solar_anchors = build(solar_results)
+
+    payload = {
+        "solar": solar_rows,
+        "sunshine": sun_rows,
+        "anchors": {"solar": solar_anchors, "sunshine": sun_anchors},
+        "v2_defaults": V2_DEFAULTS,
+        "v2_objectives": V2_OBJECTIVES,
+    }
+    path.parent.mkdir(parents=True, exist_ok=True)
+    with open(path, "w", encoding="utf-8") as f:
+        json.dump(payload, f, ensure_ascii=False, separators=(",", ":"))
+    print(f"  Wrote {path} (solar={len(solar_rows)}, sunshine={len(sun_rows)})")
 
 
 def plot_scatter(
@@ -473,8 +674,12 @@ def main() -> None:
         m = compute_metrics(arr)
         sun_results.append((meta, m))
 
+    # Full metric catalogue keeps EVERY station; the `livable` column marks which
+    # ones are in the ranked shortlist (data.json / top_candidates). Makes the
+    # full-catalogue-vs-shortlist split explicit instead of a silent row-count gap.
     sun_csv = OUT_DIR / "station_metrics_sunshine.csv"
-    write_csv(sun_csv, sun_results, "sunshine_normal")
+    sun_livable = {"livable": [0 if meta.stid in LIVABILITY_EXCLUDE else 1 for meta, _ in sun_results]}
+    write_csv(sun_csv, sun_results, "sunshine_normal", extra_fields=["livable"], extra_values=sun_livable)
     print(f"  Wrote {sun_csv} ({len(sun_results)} stations)")
 
     # --- Compute for solar_normal (sub: ~49 stations) ---
@@ -488,18 +693,22 @@ def main() -> None:
         solar_results.append((meta, m))
 
     solar_csv = OUT_DIR / "station_metrics_solar.csv"
-    write_csv(solar_csv, solar_results, "solar_normal")
+    solar_livable = {"livable": [0 if meta.stid in LIVABILITY_EXCLUDE else 1 for meta, _ in solar_results]}
+    write_csv(solar_csv, solar_results, "solar_normal", extra_fields=["livable"], extra_values=solar_livable)
     print(f"  Wrote {solar_csv} ({len(solar_results)} stations)")
 
     conn.close()
 
     # --- Overall scores (sunshine) ---
+    # Shortlist excludes non-residential stations (livability filter); the full
+    # metric catalogue above (station_metrics_sunshine.csv) still has every station.
     print("\nComputing overall scores (sunshine)...")
-    z = compute_z_scores(sun_results)
+    sun_candidates = [(meta, m) for meta, m in sun_results if meta.stid not in LIVABILITY_EXCLUDE]
+    z = compute_z_scores(sun_candidates)
     stability, transition, overall = compute_overall_scores(z)
 
     # Write top candidates CSV
-    scored = list(zip(sun_results, overall, stability, transition))
+    scored = list(zip(sun_candidates, overall, stability, transition))
     scored.sort(key=lambda x: x[1])  # Low overall = good
 
     top_csv = OUT_DIR / "top_candidates_sunshine.csv"
@@ -596,6 +805,10 @@ def main() -> None:
     if sun_results and solar_results:
         print("\nRunning validation (sunshine vs solar)...")
         run_validation(sun_results, solar_results, plots_dir, OUT_DIR)
+
+    # --- Export web/data.json (v1 + v2 scoring) ---
+    print("\nExporting web/data.json...")
+    export_web_json(sun_results, solar_results, WEB_DIR / "data.json")
 
     print("\nDone.")
 

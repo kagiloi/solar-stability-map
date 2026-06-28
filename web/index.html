@@ -43,6 +43,16 @@ header p { color: var(--text-dim); font-size: 0.9rem; margin-top: 4px; }
 .source-btn.active { color: var(--bg); background: var(--accent); border-color: var(--accent); font-weight: 600; }
 .source-note { font-size: 0.8rem; color: var(--text-dim); margin-left: 12px; align-self: center; }
 
+.model-switcher { display: flex; gap: 4px; margin-bottom: 16px; align-items: center; flex-wrap: wrap; }
+.model-switcher .label { font-size: 0.8rem; color: var(--text-dim); margin-right: 4px; }
+.model-btn {
+  padding: 8px 16px; background: var(--surface); border: 1px solid var(--border);
+  color: var(--text-dim); cursor: pointer; font-size: 0.85rem; border-radius: 6px; transition: all 0.2s;
+}
+.model-btn:hover { color: var(--text); border-color: var(--text-dim); }
+.model-btn.active { color: var(--bg); background: var(--good); border-color: var(--good); font-weight: 600; }
+.pareto-star { color: #e0c040; }
+
 .tabs { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
 .tab {
   padding: 10px 20px; background: none; border: none; color: var(--text-dim);
@@ -173,13 +183,21 @@ footer a { color: var(--accent); text-decoration: none; }
 
 <div class="info-grid" id="summary-cards"></div>
 
+<!-- Scoring model switcher -->
+<div class="model-switcher">
+  <span class="label">Scoring model:</span>
+  <button class="model-btn active" data-model="v2">v2 · 非補償(飽和floor + Chebyshev)</button>
+  <button class="model-btn" data-model="v1">v1 · 線形 z 和</button>
+  <span class="source-note" id="model-note"></span>
+</div>
+
 <!-- Weight sliders (global, above tabs) -->
 <div class="weight-panel">
   <div class="weight-panel-header" id="weight-toggle">
-    <h3>Score Weights</h3>
-    <span class="toggle" id="weight-toggle-label">&#9660; open</span>
+    <h3 id="weight-panel-title">Score Weights</h3>
+    <span class="toggle" id="weight-toggle-label">&#9650; close</span>
   </div>
-  <div class="weight-panel-body collapsed" id="weight-body">
+  <div class="weight-panel-body" id="weight-body">
     <div class="weight-grid" id="weight-grid"></div>
     <div class="weight-actions">
       <button id="weight-reset">Reset to default</button>
@@ -201,15 +219,17 @@ footer a { color: var(--accent); text-decoration: none; }
   <div class="map-controls">
     <label>Color by:</label>
     <select id="map-metric">
-      <option value="overall">Overall Score (low=good)</option>
-      <option value="stability">Stability Score</option>
-      <option value="transition">Transition Score</option>
-      <option value="amplitude">Amplitude (low=stable)</option>
+      <option value="overall">Active Score (low=good)</option>
       <option value="winter_floor">Winter Floor (high=bright)</option>
+      <option value="total_variation">Total Variation Σ|Δ| (low=calm)</option>
+      <option value="excess_tv">Excess TV 非季節変動 (low=good)</option>
+      <option value="amplitude">Amplitude (low=stable)</option>
       <option value="mean_val" id="opt-mean-val">Mean (unit)</option>
-      <option value="ramp">Ramp (low=stable)</option>
       <option value="spring_30d_gain">Spring 30d Gain (low=gentle)</option>
       <option value="autumn_30d_drop">Autumn 30d Drop (low=gentle)</option>
+      <option value="score_v2">score_v2 (生成時の既定重み)</option>
+      <option value="stability">v1 Stability Score</option>
+      <option value="transition">v1 Transition Score</option>
     </select>
   </div>
   <div id="map"></div>
@@ -231,7 +251,8 @@ footer a { color: var(--accent); text-decoration: none; }
 <!-- TABLE PANEL -->
 <div id="panel-table" class="panel">
   <div class="note-box">
-    Low overall_score = good (stable light, gentle transitions, bright winter). Click column headers to sort.
+    Score が低い = 良い。<span class="pareto-star">★</span> = Pareto 最適（winter_floor↑ × total_variation↓ で非劣＝どちらかを犠牲にしないと改善できない候補）。
+    重みは上の「Score Weights」パネルで調整可（v2 の (a)/(b)/(c) はここを動かすだけ）。列見出しでソート。
   </div>
   <div class="table-wrapper">
     <table id="ranking-table">
@@ -261,23 +282,33 @@ footer a { color: var(--accent); text-decoration: none; }
       Default is 全天日射量 (solar radiation) as it better represents the actual light environment.
       日照時間 covers 3x more stations but is a binary threshold measure.
     </p>
+    <h3 style="font-size:1rem;margin:20px 0 8px;">Scoring models</h3>
+    <div class="note-box" style="border-left-color:var(--good);">
+      <strong>v2 (default) — 非補償・絶対基準</strong>: データ衛生（南極の昭和基地を除外）→ 各指標を固定アンカーで
+      desirability [0,1] に（z スコアをやめサンプル非依存に）→ augmented weighted Chebyshev
+      <code>score_v2 = max<sub>j</sub> w<sub>j</sub>(1−d<sub>j</sub>) + ρ·Σ</code> で集約（弱い軸が支配＝floor と delta を交換不可に）。
+      根拠: 春の日射<em>変化率</em>が双極I型の発症年齢と関連（Bauer ら多施設, PMID 28722128）／冬の光は
+      <em>飽和</em>するのでハード閾値でなく凹型ペナルティ（Zeitzer 2000, PMID 10922269）。詳細は
+      <code>docs/adr/004_phase2-scoring-v2.md</code>。<br>
+      <strong>v1 — 線形 z 和</strong>: 各指標 z スコアの重み付き和。補償型でサンプル依存。比較用に残置。
+    </div>
     <h3 style="font-size:1rem;margin:20px 0 8px;">Metrics</h3>
     <table style="font-size:0.82rem;margin-bottom:20px;">
       <tr><th style="text-align:left;">Metric</th><th style="text-align:left;">Meaning</th><th style="text-align:left;">Good</th></tr>
-      <tr><td style="text-align:left;">mean_val</td><td style="text-align:left;">Annual average value</td><td style="text-align:left;">High</td></tr>
+      <tr><td style="text-align:left;">winter_floor</td><td style="text-align:left;">Mean smoothed Dec15-Feb15 (うつ軸・飽和)</td><td style="text-align:left;">High</td></tr>
+      <tr><td style="text-align:left;">spring_30d_gain</td><td style="text-align:left;">Max 30-day increase (春の立ち上がりレート, Bauer)</td><td style="text-align:left;">Low</td></tr>
+      <tr><td style="text-align:left;">autumn_30d_drop</td><td style="text-align:left;">Max 30-day decrease (秋の落ち込みレート)</td><td style="text-align:left;">Low</td></tr>
+      <tr><td style="text-align:left;">total_variation</td><td style="text-align:left;">Σ|Δ| 年間の総変動 (≒ ramp×365)</td><td style="text-align:left;">Low</td></tr>
+      <tr><td style="text-align:left;">excess_tv</td><td style="text-align:left;">total_variation − 2·range = 非季節的な往復（梅雨/連続曇天など）。<strong>固定窓なし＝時期非依存</strong>（石垣の5月梅雨も東北の7月梅雨も、起きた時期に関係なく捕捉）</td><td style="text-align:left;">Low</td></tr>
       <tr><td style="text-align:left;">amplitude</td><td style="text-align:left;">(P95-P05)/mean of smoothed curve</td><td style="text-align:left;">Low</td></tr>
-      <tr><td style="text-align:left;">ramp</td><td style="text-align:left;">Avg daily change of smoothed</td><td style="text-align:left;">Low</td></tr>
-      <tr><td style="text-align:left;">winter_floor</td><td style="text-align:left;">Mean smoothed Dec15-Feb15</td><td style="text-align:left;">High</td></tr>
-      <tr><td style="text-align:left;">spring_30d_gain</td><td style="text-align:left;">Max 30-day increase</td><td style="text-align:left;">Low</td></tr>
-      <tr><td style="text-align:left;">autumn_30d_drop</td><td style="text-align:left;">Max 30-day decrease</td><td style="text-align:left;">Low</td></tr>
-      <tr><td style="text-align:left;">spring_rise_days</td><td style="text-align:left;">Days 25%->75% level</td><td style="text-align:left;">High</td></tr>
-      <tr><td style="text-align:left;">autumn_fall_days</td><td style="text-align:left;">Days 75%->25% level</td><td style="text-align:left;">High</td></tr>
+      <tr><td style="text-align:left;">mean_val</td><td style="text-align:left;">Annual average value</td><td style="text-align:left;">High</td></tr>
     </table>
     <h3 style="font-size:1rem;margin:20px 0 8px;">Limitations</h3>
     <ul style="color:var(--text-dim);font-size:0.85rem;padding-left:20px;">
-      <li>Only normals (平年値) used -- year-to-year variability not captured</li>
-      <li>No livability/population filter applied</li>
-      <li><code>autumn_30d_drop</code> has weak sunshine-solar correlation (r=0.127)</li>
+      <li>平年値 + 15日平滑のため <code>total_variation</code> は「実生活の変動」ではなく<strong>「季節傾き + 梅雨構造」</strong>。総観スケール（連続曇天）・年々変動は捕捉できない（真の変動には日別生データが必要）。</li>
+      <li>居住可能性フィルタ未適用（南鳥島・父島など無人島が上位に出る）。</li>
+      <li>重み・アンカー・k・ρ は判断レバー。感度分析は今後。</li>
+      <li><code>autumn_30d_drop</code> は sunshine-solar 相関が弱い (r=0.127)。</li>
     </ul>
     <h3 style="font-size:1rem;margin:20px 0 8px;">Data Source</h3>
     <p style="color:var(--text-dim);font-size:0.85rem;">
@@ -325,15 +356,57 @@ WEIGHT_FIELDS.forEach(f => { weights[f.key] = f.defaultW; });
 // Z-score cache per source
 let zScoreCache = {};
 
+// ---- v2: science-grounded, absolute-anchored, non-compensatory scoring ----
+// See docs/adr/004_phase2-scoring-v2.md. (a)/(b)/(c) = same formula, different weights.
+let scoringModel = 'v2';
+let ANCHORS = {};            // data.anchors[currentSource]
+let v2weights = {};          // initialized from data.v2_defaults
+let V2_DEFAULTS_CACHE = {};  // pristine copy of data.v2_defaults (for Reset)
+
+const V2_FIELDS = [
+  { key: 'w_floor',     label: 'Winter floor',       min: 0, max: 3,   step: 0.1,  desc: '冬の明るさの重み（飽和ペナルティ）' },
+  { key: 'w_spring',    label: 'Spring rate',        min: 0, max: 3,   step: 0.1,  desc: '春の急な立ち上がりを罰（Bauer: 最良エビデンス）' },
+  { key: 'w_autumn',    label: 'Autumn rate',        min: 0, max: 3,   step: 0.1,  desc: '秋の急な落ち込みを罰（うつ側）' },
+  { key: 'w_excessTV',  label: 'Excess TV 非季節',   min: 0, max: 3,   step: 0.1,  desc: '非季節的な往復を罰（時期非依存・固定窓なし。梅雨/曇天連続など）' },
+  { key: 'w_amplitude', label: 'Amplitude',          min: 0, max: 3,   step: 0.1,  desc: '季節振幅を罰' },
+  { key: 'k_floor',     label: 'Floor saturation k', min: 0, max: 6,   step: 0.1,  desc: '大きいほど暗い冬を急に罰し、明るい側は飽和' },
+  { key: 'rho',         label: 'Tie-breaker ρ',      min: 0, max: 0.5, step: 0.01, desc: 'augmented Chebyshev の微小線形項' },
+];
+
+const V2_OBJ = ['floor', 'spring', 'autumn', 'excessTV', 'amplitude'];
+
+function v2Desir(d, anchors, k) {
+  const cl = x => Math.max(0, Math.min(1, x));
+  const norm = (v, a) => (a && a[1] > a[0] ? cl((v - a[0]) / (a[1] - a[0])) : 0);
+  const sat = (n, kk) => (Math.abs(kk) < 1e-9 ? n : (1 - Math.exp(-kk * n)) / (1 - Math.exp(-kk)));
+  return {
+    floor:     sat(norm(d.winter_floor, anchors.floor), k),
+    spring:    1 - norm(d.spring_30d_gain, anchors.spring),
+    autumn:    1 - norm(d.autumn_30d_drop, anchors.autumn),
+    excessTV:  1 - norm(d.excess_tv, anchors.excessTV),
+    amplitude: 1 - norm(d.amplitude, anchors.amplitude),
+  };
+}
+function v2Score(d, anchors, w) {
+  const des = v2Desir(d, anchors, w.k_floor);
+  const gaps = V2_OBJ.map(o => w['w_' + o] * (1 - des[o]));
+  return Math.max(...gaps) + w.rho * gaps.reduce((a, b) => a + b, 0);
+}
+function activeFields() { return scoringModel === 'v2' ? V2_FIELDS : WEIGHT_FIELDS; }
+function activeWeights() { return scoringModel === 'v2' ? v2weights : weights; }
+
 function getMetricMeta() {
   const u = SOURCE_META[currentSource].unit;
   return {
-    overall:         { label: 'Overall Score', lower_is_good: true, fmt: v => v.toFixed(2) },
-    stability:       { label: 'Stability Score', lower_is_good: true, fmt: v => v.toFixed(2) },
-    transition:      { label: 'Transition Score', lower_is_good: true, fmt: v => v.toFixed(2) },
+    overall:         { label: 'Active Score', lower_is_good: true, fmt: v => v.toFixed(2) },
+    score_v2:        { label: 'score_v2 (既定重み/固定)', lower_is_good: true, fmt: v => v.toFixed(3) },
+    stability:       { label: 'v1 Stability', lower_is_good: true, fmt: v => v.toFixed(2) },
+    transition:      { label: 'v1 Transition', lower_is_good: true, fmt: v => v.toFixed(2) },
     mean_val:        { label: `Mean (${u})`, lower_is_good: false, fmt: v => v.toFixed(2) },
     amplitude:       { label: 'Amplitude', lower_is_good: true, fmt: v => v.toFixed(3) },
     ramp:            { label: 'Ramp', lower_is_good: true, fmt: v => v.toFixed(4) },
+    total_variation: { label: 'Total Variation Σ|Δ|', lower_is_good: true, fmt: v => v.toFixed(2) },
+    excess_tv:       { label: 'Excess TV (非季節変動)', lower_is_good: true, fmt: v => v.toFixed(2) },
     winter_floor:    { label: `Winter Floor (${u})`, lower_is_good: false, fmt: v => v.toFixed(2) },
     summer_ceiling:  { label: `Summer Ceiling (${u})`, lower_is_good: false, fmt: v => v.toFixed(2) },
     spring_30d_gain: { label: 'Spring 30d Gain', lower_is_good: true, fmt: v => v.toFixed(2) },
@@ -345,16 +418,16 @@ function getMetricMeta() {
 
 const TABLE_COLS = [
   { key: 'rank', label: '#', fmt: v => v },
+  { key: 'pareto', label: '★', fmt: v => v ? '<span class="pareto-star">★</span>' : '' },
   { key: 'name', label: 'Station', fmt: v => v },
-  { key: 'overall', label: 'Overall' },
+  { key: 'overall', label: 'Score' },
   { key: 'mean_val', label: 'Mean' },
   { key: 'amplitude', label: 'Ampl.' },
-  { key: 'ramp', label: 'Ramp' },
   { key: 'winter_floor', label: 'W.Floor' },
+  { key: 'total_variation', label: 'TV Σ|Δ|' },
+  { key: 'excess_tv', label: 'exTV' },
   { key: 'spring_30d_gain', label: 'Spr.Gain' },
   { key: 'autumn_30d_drop', label: 'Aut.Drop' },
-  { key: 'spring_rise_days', label: 'Spr.Days' },
-  { key: 'autumn_fall_days', label: 'Aut.Days' },
   { key: 'lat', label: 'Lat', fmt: v => v ? v.toFixed(1) : '?' },
 ];
 
@@ -371,32 +444,52 @@ function computeZScores(data) {
 }
 
 function applyWeights() {
-  const z = zScoreCache[currentSource];
-  if (!z) return;
-  DATA.forEach((d, i) => {
-    let score = 0;
-    WEIGHT_FIELDS.forEach(f => {
-      score += weights[f.key] * z[f.key][i];
+  if (scoringModel === 'v2') {
+    DATA.forEach(d => { d.overall = Math.round(v2Score(d, ANCHORS, v2weights) * 1000) / 1000; });
+  } else {
+    const z = zScoreCache[currentSource];
+    if (!z) return;
+    DATA.forEach((d, i) => {
+      let score = 0;
+      WEIGHT_FIELDS.forEach(f => { score += weights[f.key] * z[f.key][i]; });
+      d.overall = Math.round(score * 1000) / 1000;
     });
-    d.overall = Math.round(score * 1000) / 1000;
-  });
-  // Recompute ranks
+  }
+  // Recompute ranks (low = good for both models)
   const sorted = [...DATA].map((d, i) => ({ d, i })).sort((a, b) => a.d.overall - b.d.overall);
   sorted.forEach((item, rank) => { item.d.rank = rank + 1; });
 }
 
-// ---- Weight panel ----
+// ---- Weight panel (model-aware: v1 linear z-sum / v2 non-compensatory) ----
+function weightClass(v) {
+  // v1 weights are signed (penalize/reward); v2 weights are non-negative magnitudes.
+  if (scoringModel === 'v2') return '';
+  return v > 0 ? 'positive' : v < 0 ? 'negative' : 'zero';
+}
+function fmtWeight(v) {
+  if (scoringModel === 'v2') return v.toFixed(2);
+  const s = v.toFixed(1);
+  return v > 0 ? '+' + s : s;
+}
+
 function buildWeightPanel() {
   const grid = document.getElementById('weight-grid');
+  const fields = activeFields();
+  const w = activeWeights();
+  document.getElementById('weight-panel-title').textContent =
+    scoringModel === 'v2' ? 'v2 Score Parameters (\u975E\u88DC\u511F)' : 'v1 Score Weights (\u7DDA\u5F62 z \u548C)';
   grid.innerHTML = '';
-  WEIGHT_FIELDS.forEach(f => {
+  fields.forEach(f => {
+    const min = f.min !== undefined ? f.min : -50;
+    const max = f.max !== undefined ? f.max : 50;
+    const step = f.step !== undefined ? f.step : 0.1;
     const row = document.createElement('div');
     row.className = 'weight-row';
-    row.title = f.desc;
+    row.title = f.desc || '';
     row.innerHTML = `
       <label>${f.label}</label>
-      <input type="range" min="-50" max="50" step="0.1" value="${weights[f.key]}" data-key="${f.key}">
-      <span class="weight-val" data-key="${f.key}">${fmtWeight(weights[f.key])}</span>
+      <input type="range" min="${min}" max="${max}" step="${step}" value="${w[f.key]}" data-key="${f.key}">
+      <span class="weight-val" data-key="${f.key}">${fmtWeight(w[f.key])}</span>
     `;
     grid.appendChild(row);
   });
@@ -405,26 +498,17 @@ function buildWeightPanel() {
     slider.addEventListener('input', () => {
       const key = slider.dataset.key;
       const val = parseFloat(slider.value);
-      weights[key] = val;
+      activeWeights()[key] = val;
       const span = grid.querySelector(`.weight-val[data-key="${key}"]`);
       span.textContent = fmtWeight(val);
-      span.className = 'weight-val ' + (val > 0 ? 'positive' : val < 0 ? 'negative' : 'zero');
+      span.className = 'weight-val ' + weightClass(val);
       onWeightsChanged();
     });
   });
-
-  // Set initial color classes
   grid.querySelectorAll('.weight-val').forEach(span => {
-    const val = weights[span.dataset.key];
-    span.className = 'weight-val ' + (val > 0 ? 'positive' : val < 0 ? 'negative' : 'zero');
+    span.className = 'weight-val ' + weightClass(activeWeights()[span.dataset.key]);
   });
-
   updateFormulaPreview();
-}
-
-function fmtWeight(v) {
-  const s = v.toFixed(1);
-  return v > 0 ? '+' + s : s;
 }
 
 function onWeightsChanged() {
@@ -437,36 +521,59 @@ function onWeightsChanged() {
 }
 
 function updateFormulaPreview() {
+  const el = document.getElementById('formula-preview');
+  if (scoringModel === 'v2') {
+    const w = v2weights;
+    const wline = V2_OBJ.map(o => `w_${o}=${(w['w_' + o]).toFixed(2)}`).join('   ');
+    el.innerHTML =
+      '<b>score_v2</b> = max<sub>j</sub>[ w<sub>j</sub>\u00B7(1\u2212d<sub>j</sub>) ] + \u03C1\u00B7\u03A3 w<sub>j</sub>\u00B7(1\u2212d<sub>j</sub>)'
+      + '   <span class="fw-zero">(\u4F4E\u3044\uFF1D\u826F / \u5F31\u3044\u8EF8\u304C\u652F\u914D\uFF1D\u975E\u88DC\u511F)</span>\n'
+      + `d_floor \u306F\u98FD\u548C k=${w.k_floor.toFixed(1)},  \u03C1=${w.rho.toFixed(2)}\n` + wline;
+    return;
+  }
   const parts = [];
-  WEIGHT_FIELDS.forEach((f, i) => {
+  WEIGHT_FIELDS.forEach(f => {
     const w = weights[f.key];
-    if (w === 0) {
-      parts.push(`<span class="fw-zero"> 0.0\u00B7z(${f.key})</span>`);
-      return;
-    }
+    if (w === 0) { parts.push(`<span class="fw-zero"> 0.0\u00B7z(${f.key})</span>`); return; }
     const sign = w > 0 ? '+' : '';
     const cls = w > 0 ? 'fw-pos' : 'fw-neg';
     parts.push(`<span class="${cls}">${sign}${w.toFixed(1)}</span>\u00B7z(${f.key})`);
   });
-  document.getElementById('formula-preview').innerHTML =
-    '<b>overall</b> = ' + parts.join('  ');
+  el.innerHTML = '<b>overall</b> = ' + parts.join('  ');
 }
 
 function setWeights(newWeights) {
-  WEIGHT_FIELDS.forEach(f => {
-    weights[f.key] = newWeights[f.key] !== undefined ? newWeights[f.key] : 0;
+  const w = activeWeights();
+  activeFields().forEach(f => {
+    if (newWeights[f.key] !== undefined) w[f.key] = newWeights[f.key];
   });
-  // Update sliders
   document.querySelectorAll('#weight-grid input[type=range]').forEach(slider => {
-    slider.value = weights[slider.dataset.key];
+    slider.value = w[slider.dataset.key];
   });
   document.querySelectorAll('#weight-grid .weight-val').forEach(span => {
-    const val = weights[span.dataset.key];
+    const val = w[span.dataset.key];
     span.textContent = fmtWeight(val);
-    span.className = 'weight-val ' + (val > 0 ? 'positive' : val < 0 ? 'negative' : 'zero');
+    span.className = 'weight-val ' + weightClass(val);
   });
   onWeightsChanged();
 }
+
+// ---- Scoring model switch ----
+document.querySelectorAll('.model-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    const m = btn.dataset.model;
+    if (m === scoringModel) return;
+    scoringModel = m;
+    document.querySelectorAll('.model-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    document.getElementById('model-note').textContent = m === 'v2'
+      ? '\u98FD\u548C\u3057\u305F\u51ACfloor + \u6625/\u79CB\u30EC\u30FC\u30C8 + \u6885\u96E8\u3002\u5F31\u3044\u8EF8\u304C\u652F\u914D\uFF08floor\u3068delta\u306F\u4EA4\u63DB\u4E0D\u53EF\uFF09\u3002'
+      : '\u5404\u6307\u6A19\u306E z \u30B9\u30B3\u30A2\u306E\u91CD\u307F\u4ED8\u304D\u548C\uFF08\u88DC\u511F\u578B\u30FB\u30B5\u30F3\u30D7\u30EB\u4F9D\u5B58\uFF09\u3002';
+    buildWeightPanel();
+    applyWeights();
+    renderAll();
+  });
+});
 
 // Toggle
 document.getElementById('weight-toggle').addEventListener('click', () => {
@@ -478,13 +585,17 @@ document.getElementById('weight-toggle').addEventListener('click', () => {
 
 // Reset / Zero
 document.getElementById('weight-reset').addEventListener('click', () => {
+  if (scoringModel === 'v2') { setWeights({ ...V2_DEFAULTS_CACHE }); return; }
   const dw = {};
   WEIGHT_FIELDS.forEach(f => { dw[f.key] = f.defaultW; });
   setWeights(dw);
 });
 document.getElementById('weight-zero').addEventListener('click', () => {
   const zw = {};
-  WEIGHT_FIELDS.forEach(f => { zw[f.key] = 0; });
+  // For v2, only zero the objective weights; keep k_floor / rho (shape params).
+  activeFields().forEach(f => {
+    zw[f.key] = (f.key === 'k_floor' || f.key === 'rho') ? activeWeights()[f.key] : 0;
+  });
   setWeights(zw);
 });
 
@@ -497,6 +608,7 @@ document.querySelectorAll('.source-btn').forEach(btn => {
     document.querySelectorAll('.source-btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
     DATA = ALL_DATA[currentSource];
+    ANCHORS = (ALL_DATA.anchors && ALL_DATA.anchors[currentSource]) || {};
     applyWeights();
     renderAll();
   });
@@ -582,17 +694,18 @@ function renderMap() {
   filtered.forEach(d => {
     const color = colorScale(d[metric], min, max, meta.lower_is_good);
     const marker = L.circleMarker([d.lat, d.lon], {
-      radius: 7, fillColor: color, color: '#222', weight: 1, fillOpacity: 0.85,
+      radius: d.pareto ? 9 : 7, fillColor: color,
+      color: d.pareto ? '#fff' : '#222', weight: d.pareto ? 2 : 1, fillOpacity: 0.85,
     }).addTo(map);
 
     marker.bindPopup(`
       <div style="font-size:13px;line-height:1.6;">
-        <strong>${d.name}</strong> (#${d.rank})<br>
-        Overall: <b>${d.overall.toFixed(2)}</b><br>
+        <strong>${d.name}</strong> (#${d.rank}) ${d.pareto ? '<span style="color:#c8a000;">★ Pareto</span>' : ''}<br>
+        Score: <b>${d.overall.toFixed(2)}</b><br>
         ${meta.label}: <b>${meta.fmt(d[metric])}</b><br>
         Mean: ${d.mean_val.toFixed(2)} ${sm.unit}<br>
-        Amplitude: ${d.amplitude.toFixed(3)}<br>
-        Winter Floor: ${d.winter_floor.toFixed(2)} ${sm.unit}
+        Winter Floor: ${d.winter_floor.toFixed(2)} ${sm.unit}<br>
+        Total Variation: ${d.total_variation.toFixed(2)}, Excess TV: ${d.excess_tv.toFixed(2)}
       </div>
     `);
     marker.bindTooltip(d.name, { permanent: false, direction: 'top', offset: [0, -8] });
@@ -649,10 +762,12 @@ function renderScatter() {
     textposition: 'top center', textfont: { size: 9, color: '#8a8d9a' },
     texttemplate: filtered.map(d => d.name),
     marker: {
-      size: 9, color: filtered.map(d => d[cKey]),
+      size: filtered.map(d => d.pareto ? 13 : 9),
+      symbol: filtered.map(d => d.pareto ? 'star' : 'circle'),
+      color: filtered.map(d => d[cKey]),
       colorscale: cMeta.lower_is_good ? [[0,'#4caf82'],[0.5,'#e0c040'],[1,'#e05555']] : [[0,'#e05555'],[0.5,'#e0c040'],[1,'#4caf82']],
       colorbar: { title: cMeta.label, tickfont: { color: '#8a8d9a' }, titlefont: { color: '#8a8d9a' } },
-      line: { width: 0.5, color: '#333' },
+      line: { width: filtered.map(d => d.pareto ? 1.2 : 0.5), color: filtered.map(d => d.pareto ? '#fff' : '#333') },
     },
     type: 'scatter',
   };
@@ -714,11 +829,17 @@ fetch('data.json')
   .then(r => r.json())
   .then(data => {
     ALL_DATA = data;
-    // Precompute z-scores for both sources
+    // v2 config
+    V2_DEFAULTS_CACHE = { ...(data.v2_defaults || {}) };
+    v2weights = { ...(data.v2_defaults || {}) };
+    // Precompute v1 z-scores for both sources
     ['solar', 'sunshine'].forEach(src => {
       zScoreCache[src] = computeZScores(ALL_DATA[src]);
     });
     DATA = ALL_DATA[currentSource];
+    ANCHORS = (data.anchors && data.anchors[currentSource]) || {};
+    document.getElementById('model-note').textContent =
+      '飽和した冬floor + 春/秋レート + 梅雨。弱い軸が支配（floorとdeltaは交換不可）。';
     applyWeights();
     buildWeightPanel();
     renderAll();
