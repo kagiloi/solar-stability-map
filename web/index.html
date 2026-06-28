@@ -203,8 +203,8 @@ table.cmp thead th { font-weight: 600; }
 
     <span class="seg-label">データ源</span>
     <div class="btn-group" id="source-group">
-      <button class="btn active" data-source="solar">全天日射量</button>
-      <button class="btn" data-source="sunshine">日照時間</button>
+      <button class="btn" data-source="solar">全天日射量</button>
+      <button class="btn active" data-source="sunshine">日照時間</button>
     </div>
 
     <span class="seg-label">モデル</span>
@@ -381,7 +381,7 @@ table.cmp thead th { font-weight: 600; }
 let ALL_DATA = {};
 let DATA = [];
 let SERIES = null;          // lazy series.json {meta, stations}
-let currentSource = 'solar';
+let currentSource = 'sunshine';  // default source (candidate basins 松本/諏訪 only exist here; 全天日射量 selectable)
 
 const SOURCE_META = {
   solar:    { unit: 'MJ/m²/day', label: '全天日射量', meanLabel: 'Mean Solar Radiation', seriesKey: 'solar' },
