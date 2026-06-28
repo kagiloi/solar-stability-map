@@ -56,6 +56,37 @@ header p { color: var(--text-dim); font-size: 0.9rem; margin-top: 4px; }
 .band-yellow { color: #e0c040; }
 .band-red { color: #e05555; font-weight: 600; }
 
+/* Help button + glossary modal */
+.help-btn {
+  background: var(--surface); border: 1px solid var(--border); color: var(--text);
+  cursor: pointer; border-radius: 6px; padding: 7px 14px; font-size: 0.85rem; transition: all 0.2s;
+}
+.help-btn:hover { border-color: var(--accent); color: var(--accent); }
+th[title] { cursor: help; }
+th[title]:hover { color: var(--accent); }
+.modal-overlay {
+  position: fixed; inset: 0; background: rgba(0,0,0,0.62); display: none;
+  align-items: flex-start; justify-content: center; z-index: 1000; padding: 40px 16px; overflow-y: auto;
+}
+.modal-overlay.open { display: flex; }
+.modal {
+  background: var(--surface); border: 1px solid var(--border); border-radius: 10px;
+  max-width: 920px; width: 100%; padding: 24px 28px 32px; position: relative;
+}
+.modal h2 { font-size: 1.25rem; margin-bottom: 10px; }
+.modal h3 { font-size: 0.95rem; margin: 20px 0 6px; color: var(--accent); }
+.modal table { width: 100%; border-collapse: collapse; font-size: 0.82rem; margin-bottom: 6px; }
+.modal th, .modal td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--border); white-space: normal; vertical-align: top; }
+.modal th { color: var(--text-dim); font-weight: 500; position: static; background: none; }
+.modal td:first-child { white-space: nowrap; font-family: 'SF Mono','Menlo',monospace; color: var(--text); }
+.modal .note { color: var(--text-dim); font-size: 0.85rem; line-height: 1.7; }
+.modal code { background: var(--bg); padding: 1px 5px; border-radius: 4px; }
+.modal-close {
+  position: absolute; top: 12px; right: 16px; background: none; border: none;
+  color: var(--text-dim); font-size: 1.6rem; line-height: 1; cursor: pointer;
+}
+.modal-close:hover { color: var(--text); }
+
 .tabs { display: flex; gap: 4px; margin-bottom: 20px; border-bottom: 1px solid var(--border); }
 .tab {
   padding: 10px 20px; background: none; border: none; color: var(--text-dim);
@@ -174,6 +205,7 @@ footer a { color: var(--accent); text-decoration: none; }
 <div class="container">
 
 <header>
+  <button class="help-btn" id="help-open" style="float:right;margin-top:4px;">❓ 指標の説明</button>
   <h1>光環境安定性マップ</h1>
   <p id="subtitle"></p>
 </header>
@@ -332,6 +364,80 @@ footer a { color: var(--accent); text-decoration: none; }
 
 </div>
 
+<!-- GLOSSARY MODAL -->
+<div class="modal-overlay" id="help-modal">
+  <div class="modal">
+    <button class="modal-close" id="help-close" title="閉じる">&times;</button>
+    <h2>指標の説明</h2>
+    <p class="note">
+      <b>スコアは低いほど良い</b>。ほとんどの指標は気象庁の<b>30年平年値</b>を15日平滑した曲線から算出。
+      <b>冬リスク・連続曇天・冬の実日照・当たり外れ</b>だけは<b>実観測の日別1991-2020</b>から。
+      単位はソースで変わる(日照時間=<b>時間/日</b>, 全天日射=<b>MJ/m²/日</b>)。候補検討は松本/諏訪を含む<b>日照時間(155地点)</b>ソースで。
+    </p>
+
+    <h3>① 識別・ランク</h3>
+    <table>
+      <tr><th>列</th><th>意味</th></tr>
+      <tr><td>#</td><td>現在のスコアでの順位(1=最良)</td></tr>
+      <tr><td>★</td><td><b>Pareto最適</b>: 「冬の明るさ↑ × 年間変動↓」で非劣＝どちらかを犠牲にしないともう片方を改善できない地点</td></tr>
+      <tr><td>Station / Lat</td><td>地点名 / 緯度</td></tr>
+    </table>
+
+    <h3>② スコア(低い=良い)</h3>
+    <table>
+      <tr><th>指標</th><th>意味</th></tr>
+      <tr><td>Score</td><td>選択中モデル(v2/v1)の総合スコア。低い=良い</td></tr>
+      <tr><td>score_v2</td><td>v2を「生成時の既定重み」で計算した固定参照値(スライダーを動かしても不変)</td></tr>
+      <tr><td>v1 Stability / Transition</td><td>旧v1(線形z和)の内訳: 安定性 / 季節遷移パート</td></tr>
+    </table>
+    <p class="note">v2の作り方: 各指標を絶対基準で desirability d∈[0,1](1=理想)に変換 → <code>D = max&#8202;wⱼ(1−dⱼ) + ρ·Σ</code>(=一番ダメな軸が支配する<b>非補償</b>。明るさと変動を交換不可にする)。</p>
+
+    <h3>③ レベル指標(明るさ。高い=明るい)</h3>
+    <table>
+      <tr><th>指標</th><th>良い向き</th><th>中身</th></tr>
+      <tr><td>Mean</td><td>高</td><td>年平均の明るさ</td></tr>
+      <tr><td>W.Floor</td><td>高</td><td><b>冬(12/15–2/15)の明るさ</b>。v2の主軸、冬うつ対策の核</td></tr>
+      <tr><td>summer_ceiling</td><td>(参考)</td><td>夏(6/15–8/15)の明るさ</td></tr>
+    </table>
+
+    <h3>④ 変動・季節遷移(低い=穏やか)</h3>
+    <table>
+      <tr><th>指標</th><th>良い向き</th><th>中身</th></tr>
+      <tr><td>Ampl.</td><td>低</td><td>年較差 (P95−P05)/平均。季節振幅の相対サイズ</td></tr>
+      <tr><td>ramp</td><td>低</td><td>1日あたり平均変化量</td></tr>
+      <tr><td>TV Σ|Δ|</td><td>低</td><td>年間の総変動 = Σ|前日差| (≒ramp×365)</td></tr>
+      <tr><td>exTV</td><td>低</td><td>TV − 2×年較差 = 単峰の季節掃引を超えた"往復"分＝<b>梅雨など非季節変動</b>。固定窓なし=時期非依存</td></tr>
+      <tr><td>Spr.Gain</td><td>低</td><td>春(トラフ→ピーク)の30日最大増加=立ち上がりの急さ(躁・早期発症リスク)</td></tr>
+      <tr><td>Aut.Drop</td><td>低</td><td>秋(ピーク→トラフ)の30日最大下落=落ち込みの急さ</td></tr>
+      <tr><td>spring_rise_days / autumn_fall_days</td><td>高</td><td>春に25→75% / 秋に75→25% へ変わる所要日数(大=ゆっくり=良)</td></tr>
+    </table>
+
+    <h3>⑤ 冬リスク overlay(<b>実観測日別1991-2020</b>。スコアには入れない red-flag)</h3>
+    <table>
+      <tr><th>列</th><th>良い向き</th><th>中身</th></tr>
+      <tr><td>冬リスク</td><td><span class="band-green">緑</span></td><td>連続曇天から判定: <span class="band-green">緑≤5日</span> / <span class="band-yellow">黄</span> / <span class="band-red">赤≥10日</span></td></tr>
+      <tr><td>連続曇天d</td><td>低</td><td><b>悪い冬の最長連続曇天日数(CVaR80)</b>: 「日照&lt;2hの日」の連続日数、各冬の最長を取り、悪い方20%の平均。「ハズレ冬にどれだけ日が射さない日が続くか」</td></tr>
+      <tr><td>冬の実日照</td><td>高</td><td>実観測の冬(Nov–Mar)平均日照時間</td></tr>
+      <tr><td>当たり外れ</td><td>低</td><td>冬平均の年々ばらつき(CV%)。低い=毎年安定して同じ冬</td></tr>
+    </table>
+    <p class="note">⚠️ なぜスコアに入れないか: 連続曇天は W.Floor と r=−0.88(77%重複)で二重計上になる + 重み付けは確証バイアスを生むため、<b>警告表示のみ</b>。</p>
+
+    <h3>⑥ v2パラメータ(スライダー。動かすと再ランク)</h3>
+    <table>
+      <tr><th>スライダー</th><th>既定</th><th>意味</th></tr>
+      <tr><td>w_floor / w_spring / w_autumn</td><td>1.0 / 1.0 / 0.7</td><td>冬明るさ / 春レート / 秋レート の重み</td></tr>
+      <tr><td>w_excessTV / w_amplitude</td><td>0.3 / 0.3</td><td>非季節変動 / 年較差 の重み(探索的=低め)</td></tr>
+      <tr><td>k_floor</td><td>2.5</td><td>冬floorの飽和の強さ。大=暗い冬を急に罰し、明るい側は頭打ち</td></tr>
+      <tr><td>ρ (rho)</td><td>0.1</td><td>非補償集約のタイブレーク微調整</td></tr>
+    </table>
+
+    <p class="note" style="margin-top:16px;border-top:1px solid var(--border);padding-top:12px;">
+      <b>使い方</b>: Score(低い=良い)で全体順位 → ただし候補は必ず<b>「冬リスク=緑」と「W.Floor高い」</b>を確認。
+      <span class="band-red">赤</span>バンド(連続2週間無日照=日本海側)は問答無用で除外、が一番効く使い方。
+    </p>
+  </div>
+</div>
+
 <footer>
   <div class="container">
     Data: JMA 平年値 |
@@ -447,6 +553,42 @@ const TABLE_COLS = [
   { key: 'autumn_30d_drop', label: 'Aut.Drop' },
   { key: 'lat', label: 'Lat', fmt: v => v ? v.toFixed(1) : '?' },
 ];
+
+// Hover descriptions for table-header columns (and reusable elsewhere).
+const HELP = {
+  rank: '現在のスコアでの順位 (1=最良)',
+  pareto: '★=Pareto最適: 冬の明るさ↑ × 年間変動↓ で非劣(どちらかを犠牲にしないと改善不可)',
+  name: '地点名',
+  overall: '総合スコア(低い=良い)。選択中モデル(v2/v1)で計算',
+  score_v2: 'v2を既定重みで計算した固定参照値(スライダーで不変)',
+  stability: 'v1(線形z和)の安定性パート',
+  transition: 'v1の季節遷移パート',
+  mean_val: '年平均の明るさ(高い=明るい)。日照=時間/日, 日射=MJ/m²/日',
+  amplitude: '年較差 (P95−P05)/平均。低い=季節変化が小さく安定',
+  ramp: '1日あたりの平均変化量。低い=穏やか',
+  winter_floor: '冬(12/15−2/15)の明るさ。高い=良い。v2の主軸',
+  summer_ceiling: '夏(6/15−8/15)の明るさ(参考)',
+  total_variation: '年間の総変動 Σ|前日差|。低い=穏やか',
+  excess_tv: '非季節変動(梅雨等)。TV−2×年較差。固定窓なし。低い=良い',
+  dark_spell: '悪い冬の最長連続曇天日数(CVaR80, 日照<2h, 実観測日別)。低い=良い',
+  winter_obs: '実観測の冬(Nov−Mar)平均日照時間。高い=良い',
+  interann_cv: '冬平均の年々ばらつき(CV%)。低い=毎年安定した冬',
+  risk_band: '冬リスク: 連続曇天から 緑≤5日 / 黄 / 赤≥10日(実日別)。スコア外の警告',
+  spring_30d_gain: '春の30日最大増加=立ち上がりの急さ。低い=緩やか',
+  autumn_30d_drop: '秋の30日最大下落=落ち込みの急さ。低い=緩やか',
+  spring_rise_days: '春に25→75%へ変わる所要日数。大=ゆっくり=良',
+  autumn_fall_days: '秋に75→25%へ変わる所要日数。大=ゆっくり=良',
+  lat: '緯度',
+};
+
+// Glossary modal open/close
+(() => {
+  const m = document.getElementById('help-modal');
+  document.getElementById('help-open').addEventListener('click', () => m.classList.add('open'));
+  document.getElementById('help-close').addEventListener('click', () => m.classList.remove('open'));
+  m.addEventListener('click', e => { if (e.target === m) m.classList.remove('open'); });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') m.classList.remove('open'); });
+})();
 
 // ---- Z-score computation ----
 function computeZScores(data) {
@@ -814,6 +956,7 @@ function renderTable() {
   }).join('');
 
   header.querySelectorAll('th').forEach(th => {
+    th.title = HELP[th.dataset.key] || '';
     th.addEventListener('click', () => {
       const key = th.dataset.key;
       if (sortCol === key) { sortAsc = !sortAsc; } else { sortCol = key; sortAsc = true; }
