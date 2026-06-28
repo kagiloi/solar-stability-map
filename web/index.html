@@ -210,6 +210,7 @@ table.cmp thead th { font-weight: 600; }
     <span class="seg-label">モデル</span>
     <div class="btn-group" id="model-group">
       <button class="btn good active" data-model="v2">v2 非補償</button>
+      <button class="btn" data-model="v3">v3 実効光</button>
       <button class="btn" data-model="v1">v1 線形</button>
     </div>
 
@@ -247,7 +248,11 @@ table.cmp thead th { font-weight: 600; }
       <option value="mean_val" id="opt-mean-val">Mean</option>
       <option value="spring_30d_gain">春レート (低=緩)</option>
       <option value="autumn_30d_drop">秋レート (低=緩)</option>
+      <option value="winter_floor_eff">実効冬floor [v3] (高=明)</option>
+      <option value="autumn_rate">秋下降率 [v3] (低=緩)</option>
+      <option value="acute_spell">急性連続曇天 [v3] (低=良)</option>
       <option value="score_v2">score_v2 (既定重み固定)</option>
+      <option value="score_v3">score_v3 (既定重み固定)</option>
     </select>
     <span id="map-hint" style="color:var(--text-dim);font-size:0.74rem;">クリックで地点を選択(複数可)</span>
   </div>
@@ -442,14 +447,71 @@ function v2Score(d, anchors, w) {
   const gaps = V2_OBJ.map(o => w['w_' + o] * (1 - des[o]));
   return Math.max(...gaps) + w.rho * gaps.reduce((a, b) => a + b, 0);
 }
-function activeFields() { return scoringModel === 'v2' ? V2_FIELDS : WEIGHT_FIELDS; }
-function activeWeights() { return scoringModel === 'v2' ? v2weights : weights; }
+
+// ----- v3 (effective-daylight sufficiency + autumn-rate + acute spell) -----
+// Mirrors analysis/compute_metrics.py v3_desirabilities / v3_score EXACTLY so the
+// live JS score at default weights equals the precomputed score_v3.
+let v3weights = {};
+let V3_ANCHORS = {};
+let V3_DEFAULTS_CACHE = {};
+
+const V3_FIELDS = [
+  { key: 'w_floor',     label: '冬の実効光 重み',     min: 0, max: 3,   step: 0.1,  desc: '幾何補正した冬の実効昼光(W.Floor_eff)。大=高緯度で冬の太陽が低く昼も短い地点を強く下げる。v3の主軸' },
+  { key: 'w_autumn',    label: '秋の下降レート 重み',  min: 0, max: 3,   step: 0.1,  desc: '秋(秋分→冬至)の実効光の落ち込みの急さ。配偶者のうつ極が秋に出るため既定でやや重い(0.7)' },
+  { key: 'w_spring',    label: '春の上昇レート 重み',  min: 0, max: 3,   step: 0.1,  desc: '春の急な立ち上がり。本人は春の賦活はあまり問題でないため既定で軽め(0.3)' },
+  { key: 'w_excessTV',  label: '梅雨/非季節 重み',    min: 0, max: 3,   step: 0.1,  desc: '梅雨など季節外れの変動の大きさ' },
+  { key: 'w_acute',     label: '急性連続曇天 重み',    min: 0, max: 3,   step: 0.1,  desc: '非冬期(4–10月)の数日連続の暗さ(梅雨等, 実観測)。本人の急性悪化と一致。冬floorと季節非重複の独立軸' },
+  { key: 'w_amplitude', label: '年較差 重み (既定0)',  min: 0, max: 3,   step: 0.1,  desc: 'v2から外した軸。上げると年較差の小さい地点を好むが「夏も暗い」地点まで得をする副作用に注意' },
+  { key: 'w_summerCap', label: '夏の明るさ上限 重み',  min: 0, max: 3,   step: 0.1,  desc: '一方向の躁転キャップ(既定0)。上げると夏が極端に明るい地点をわずかに下げる' },
+  { key: 'k_floor',     label: '冬floorの効き方 k',   min: 0, max: 6,   step: 0.1,  desc: '実効光floorの評価カーブ。既定0=線形(暗いfloorを甘く見ない)。大=暗い冬を急に悪く評価し明るい所は頭打ち' },
+  { key: 'gate_cap',    label: '赤旗ゲート上限',       min: 0, max: 1,   step: 0.05, desc: '冬リスク赤の地点はfloor達成度をこの値で頭打ち。数週間の連続曇天を他軸で買い戻せない非補償の赤旗' },
+  { key: 'rho',         label: '同点の微調整 ρ',      min: 0, max: 0.5, step: 0.01, desc: '基本いじらなくてOK。上げると全軸合計も少し効いて同点を割る' },
+];
+const V3_OBJ = ['floor', 'autumn', 'spring', 'excessTV', 'acute', 'amplitude', 'summerCap'];
+const V3_OBJ_LABEL = { floor: '冬実効光', autumn: '秋レート', spring: '春レート', excessTV: '梅雨/非季節', acute: '急性曇天', amplitude: '年較差', summerCap: '夏上限' };
+const V3_FIELD = { floor: 'winter_floor_eff', autumn: 'autumn_rate', spring: 'spring_rate', excessTV: 'excess_tv', amplitude: 'amplitude', summerCap: 'summer_ceiling' };
+const V3_DIR = { floor: 'high', autumn: 'low', spring: 'low', excessTV: 'low', amplitude: 'low', summerCap: 'low' };
+
+function v3Desir(d, anchors, params) {
+  const cl = x => Math.max(0, Math.min(1, x));
+  const norm = (v, a) => (a && a[1] > a[0] ? cl((v - a[0]) / (a[1] - a[0])) : 0);
+  const sat = (n, kk) => (Math.abs(kk) < 1e-9 ? n : (1 - Math.exp(-kk * n)) / (1 - Math.exp(-kk)));
+  const des = {};
+  ['floor', 'autumn', 'spring', 'excessTV', 'amplitude', 'summerCap'].forEach(o => {
+    const n = norm(d[V3_FIELD[o]], anchors[o]);
+    if (o === 'floor') des[o] = sat(n, params.k_floor);
+    else if (V3_DIR[o] === 'high') des[o] = n;
+    else des[o] = 1 - n;
+  });
+  des.acute = (d.acute_spell == null || isNaN(d.acute_spell)) ? 1.0 : 1 - norm(d.acute_spell, anchors.acute);
+  if (d.risk_band === 'red') des.floor = Math.min(des.floor, params.gate_cap);
+  return des;
+}
+function v3Score(d, anchors, w) {
+  const des = v3Desir(d, anchors, w);
+  const gaps = V3_OBJ.map(o => w['w_' + o] * (1 - des[o]));
+  return Math.max(...gaps) + w.rho * gaps.reduce((a, b) => a + b, 0);
+}
+
+function activeFields() { return scoringModel === 'v2' ? V2_FIELDS : scoringModel === 'v3' ? V3_FIELDS : WEIGHT_FIELDS; }
+function activeWeights() { return scoringModel === 'v2' ? v2weights : scoringModel === 'v3' ? v3weights : weights; }
+// non-compensatory desirabilities for the active model (v2/v3); v1 falls back to v2's
+function activeDesir(d) {
+  return scoringModel === 'v3' ? v3Desir(d, V3_ANCHORS, v3weights) : v2Desir(d, ANCHORS, v2weights.k_floor);
+}
+function activeObjLabels() { return scoringModel === 'v3' ? V3_OBJ.map(o => V3_OBJ_LABEL[o]) : V2_OBJ.map(o => V2_OBJ_LABEL[o]); }
+function activeObjKeys() { return scoringModel === 'v3' ? V3_OBJ : V2_OBJ; }
 
 function getMetricMeta() {
   const u = SOURCE_META[currentSource].unit;
   return {
     overall:         { label: 'Active Score', lower_is_good: true, fmt: v => v.toFixed(2) },
     score_v2:        { label: 'score_v2 (既定重み/固定)', lower_is_good: true, fmt: v => v.toFixed(3) },
+    score_v3:        { label: 'score_v3 (既定重み/固定)', lower_is_good: true, fmt: v => v.toFixed(3) },
+    winter_floor_eff:{ label: `実効冬Floor (高=良)`, lower_is_good: false, fmt: v => v == null ? '-' : v.toFixed(2) },
+    autumn_rate:     { label: '秋下降率 [v3] (低=良)', lower_is_good: true, fmt: v => v == null ? '-' : v.toFixed(3) },
+    spring_rate:     { label: '春上昇率 [v3] (低=良)', lower_is_good: true, fmt: v => v == null ? '-' : v.toFixed(3) },
+    acute_spell:     { label: '急性連続曇天d [v3] (低=良)', lower_is_good: true, fmt: v => v == null ? '-' : v.toFixed(1) },
     mean_val:        { label: `Mean (${u})`, lower_is_good: false, fmt: v => v.toFixed(2) },
     amplitude:       { label: 'Amplitude', lower_is_good: true, fmt: v => v.toFixed(3) },
     ramp:            { label: 'Ramp', lower_is_good: true, fmt: v => v.toFixed(4) },
@@ -511,6 +573,8 @@ function computeZScores(data) {
 function applyWeights() {
   if (scoringModel === 'v2') {
     DATA.forEach(d => { d.overall = Math.round(v2Score(d, ANCHORS, v2weights) * 1000) / 1000; });
+  } else if (scoringModel === 'v3') {
+    DATA.forEach(d => { d.overall = Math.round(v3Score(d, V3_ANCHORS, v3weights) * 1000) / 1000; });
   } else {
     const z = zScoreCache[currentSource];
     if (!z) return;
@@ -528,11 +592,11 @@ function applyWeights() {
 //  Weight panel
 // ============================================================
 function weightClass(v) {
-  if (scoringModel === 'v2') return '';
+  if (scoringModel === 'v2' || scoringModel === 'v3') return '';
   return v > 0 ? 'positive' : v < 0 ? 'negative' : 'zero';
 }
 function fmtWeight(v) {
-  if (scoringModel === 'v2') return v.toFixed(2);
+  if (scoringModel === 'v2' || scoringModel === 'v3') return v.toFixed(2);
   const s = v.toFixed(1);
   return v > 0 ? '+' + s : s;
 }
@@ -589,6 +653,15 @@ function updateFormulaPreview() {
       + `floor飽和 k=${w.k_floor.toFixed(1)}　ρ=${w.rho.toFixed(2)}　　` + wline;
     return;
   }
+  if (scoringModel === 'v3') {
+    const w = v3weights;
+    const wline = V3_OBJ.map(o => `${V3_OBJ_LABEL[o]}=${(w['w_' + o]).toFixed(2)}`).join('　 ');
+    el.innerHTML =
+      '<span class="fw-zero">v3 = <b>幾何補正した実効昼光</b>のsufficiency + 秋下降レート + 急性連続曇天。冬floorは<b>太陽高度・昼長で補正</b>(高緯度ほど不利)。amplitudeは既定0(夏が暗い地点を褒める副作用を排除)。<b>マイナス無し</b>。</span>\n'
+      + '<b>score_v3</b>(低い=良い) = 各軸の「不足 = 重み×(1−達成度)」のうち <b>一番大きい軸</b>で決まる + ρで微調整。冬リスク<span class="band-red">赤</span>はfloor達成度を<b>ゲート上限</b>で頭打ち(非補償の赤旗)\n'
+      + `floor飽和 k=${w.k_floor.toFixed(1)}　赤旗上限=${w.gate_cap.toFixed(2)}　ρ=${w.rho.toFixed(2)}　　` + wline;
+    return;
+  }
   const parts = [];
   WEIGHT_FIELDS.forEach(f => {
     const w = weights[f.key];
@@ -623,6 +696,15 @@ document.getElementById('controls-toggle').addEventListener('click', () => {
     body.classList.contains('collapsed') ? '▾ 重み調整' : '▴ 重み調整';
   setTimeout(() => map.invalidateSize(), 0);
 });
+const CONTROLS_NOTE = {
+  v2: '飽和した冬floor + 春/秋レート + 梅雨/非季節 + 年較差。弱い軸が支配(floorとdeltaは交換不可)。スライダーはリアルタイム反映。',
+  v3: '幾何補正した実効昼光floor(高緯度ほど不利) + 秋下降レート + 急性連続曇天。amplitudeは既定0(夏が暗い地点を褒める副作用を排除)。冬リスク赤はfloorをゲートで頭打ち。札幌<東京を構造的に満たす。',
+  v1: '符号付き線形(z-score)。＋=罰 / −=報酬 / 0=無視。古い探索用モデル。',
+};
+function setControlsNote() {
+  const el = document.getElementById('controls-note');
+  if (el) el.textContent = CONTROLS_NOTE[scoringModel] || CONTROLS_NOTE.v2;
+}
 document.querySelectorAll('#model-group .btn').forEach(btn => {
   btn.addEventListener('click', () => {
     const m = btn.dataset.model;
@@ -630,6 +712,7 @@ document.querySelectorAll('#model-group .btn').forEach(btn => {
     scoringModel = m;
     document.querySelectorAll('#model-group .btn').forEach(b => b.classList.remove('active'));
     btn.classList.add('active');
+    setControlsNote();
     buildWeightPanel();
     applyWeights();
     renderAll();
@@ -644,6 +727,7 @@ document.querySelectorAll('#source-group .btn').forEach(btn => {
     btn.classList.add('active');
     DATA = ALL_DATA[currentSource];
     ANCHORS = (ALL_DATA.anchors && ALL_DATA.anchors[currentSource]) || {};
+    V3_ANCHORS = (ALL_DATA.v3_anchors && ALL_DATA.v3_anchors[currentSource]) || {};
     // keep only selected stids that exist in the new source
     SELECTED = SELECTED.filter(stid => DATA.some(d => d.stid === stid));
     applyWeights();
@@ -652,11 +736,13 @@ document.querySelectorAll('#source-group .btn').forEach(btn => {
 });
 document.getElementById('weight-reset').addEventListener('click', () => {
   if (scoringModel === 'v2') { setWeights({ ...V2_DEFAULTS_CACHE }); return; }
+  if (scoringModel === 'v3') { setWeights({ ...V3_DEFAULTS_CACHE }); return; }
   const dw = {}; WEIGHT_FIELDS.forEach(f => { dw[f.key] = f.defaultW; }); setWeights(dw);
 });
 document.getElementById('weight-zero').addEventListener('click', () => {
+  const keep = new Set(['k_floor', 'rho', 'gate_cap']);  // shape/tuning params, not axis weights
   const zw = {};
-  activeFields().forEach(f => { zw[f.key] = (f.key === 'k_floor' || f.key === 'rho') ? activeWeights()[f.key] : 0; });
+  activeFields().forEach(f => { zw[f.key] = keep.has(f.key) ? activeWeights()[f.key] : 0; });
   setWeights(zw);
 });
 
@@ -1044,13 +1130,16 @@ function buildCompareStatTable() {
     { key: 'overall', label: 'Score (低=良)' },
     { key: 'risk_band', label: '冬リスク' },
     { key: 'winter_floor', label: 'W.Floor (高=良)' },
+    { key: 'winter_floor_eff', label: '実効Floor [v3] (高=良)' },
     { key: 'mean_val', label: 'Mean (高=明)' },
-    { key: 'dark_spell', label: '連続曇天d (低=良)' },
+    { key: 'dark_spell', label: '冬連続曇天d (低=良)' },
+    { key: 'acute_spell', label: '急性曇天d [v3] (低=良)' },
     { key: 'winter_obs', label: '冬実日照h (高=良)' },
     { key: 'amplitude', label: '年較差 (低=良)' },
     { key: 'excess_tv', label: '梅雨/非季節 (低=良)' },
     { key: 'spring_30d_gain', label: '春レート (低=良)' },
     { key: 'autumn_30d_drop', label: '秋レート (低=良)' },
+    { key: 'autumn_rate', label: '秋下降率 [v3] (低=良)' },
     { key: 'interann_cv', label: '当たり外れ% (低=良)' },
   ];
   const head = '<tr><th></th>' + rows.map((d, i) =>
@@ -1121,12 +1210,13 @@ function drawDark() {
 }
 
 function drawRadar() {
-  const axes = V2_OBJ.map(o => V2_OBJ_LABEL[o]);
+  const objKeys = activeObjKeys();
+  const axes = activeObjLabels();
   const traces = SELECTED.map((stid, i) => {
     const d = rowByStid(stid);
     if (!d) return null;
-    const des = v2Desir(d, ANCHORS, v2weights.k_floor);
-    const r = V2_OBJ.map(o => des[o]);
+    const des = activeDesir(d);
+    const r = objKeys.map(o => des[o]);
     return {
       type: 'scatterpolar', r: r.concat([r[0]]), theta: axes.concat([axes[0]]),
       name: d.name, mode: 'lines', fill: 'toself',
@@ -1181,11 +1271,13 @@ Promise.all([
   SERIES = series;
   V2_DEFAULTS_CACHE = { ...(data.v2_defaults || {}) };
   v2weights = { ...(data.v2_defaults || {}) };
+  V3_DEFAULTS_CACHE = { ...(data.v3_defaults || {}) };
+  v3weights = { ...(data.v3_defaults || {}) };
   ['solar', 'sunshine'].forEach(src => { zScoreCache[src] = computeZScores(ALL_DATA[src]); });
   DATA = ALL_DATA[currentSource];
   ANCHORS = (data.anchors && data.anchors[currentSource]) || {};
-  document.getElementById('controls-note').textContent =
-    '飽和した冬floor + 春/秋レート + 梅雨。弱い軸が支配（floorとdeltaは交換不可）。スライダーはリアルタイム反映。';
+  V3_ANCHORS = (data.v3_anchors && data.v3_anchors[currentSource]) || {};
+  setControlsNote();
   applyWeights();
   buildWeightPanel();
   renderAll();

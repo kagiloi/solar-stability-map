@@ -90,6 +90,14 @@ class Metrics:
     trough_day: int           # DOY of smoothed minimum
     peak_day: int             # DOY of smoothed maximum
 
+    # v3: effective-light (geometry-corrected) metrics. See docs/adr/008.
+    winter_floor_eff: float   # mean E(d) over Dec15-Feb15 (beam-equiv MJ or measured GHI)
+    autumn_rate: float        # max 30d drop of E in fixed autumn window, / seasonal range (relative)
+    spring_rate: float        # max 30d gain of E in fixed spring window, / seasonal range (relative)
+    autumn_rate_abs: float    # same drop, absolute (sensitivity variant)
+    spring_rate_abs: float    # same gain, absolute (sensitivity variant)
+    eff_trough_day: int       # DOY of smoothed E minimum (should land near the solstice)
+
 
 def _circular_ma(values: np.ndarray, window: int = 15) -> np.ndarray:
     """Compute moving average with circular wrap-around."""
@@ -130,8 +138,55 @@ def _circular_range(start: int, end: int, n: int = 365) -> list[int]:
         return list(range(start, n)) + list(range(0, end + 1))
 
 
-def compute_metrics(values_365: np.ndarray) -> Metrics:
-    """Compute all metrics from a 365-element array of daily normals."""
+# ---------------------------------------------------------------------------
+# v3 solar geometry (deterministic; FAO-56). Used to build an "effective light"
+# series E(d) that discounts high-latitude winters via shorter days + lower noon
+# sun, WITHOUT any fitted coefficient or altitude term (so it sidesteps ADR 005's
+# rejection of self-estimated GHI). See docs/adr/008. Verified by analysis/v3_prototype.py.
+# ---------------------------------------------------------------------------
+def _ra_n(lat_deg: float) -> tuple[np.ndarray, np.ndarray]:
+    """FAO-56 extraterrestrial daily irradiation Ra [MJ/m2/d] and daylength N [h], 365 days (DOY 1..365)."""
+    J = np.arange(1, 366)
+    phi = math.radians(lat_deg)
+    dr = 1.0 + 0.033 * np.cos(2 * np.pi * J / 365)
+    decl = 0.409 * np.sin(2 * np.pi * J / 365 - 1.39)
+    x = np.clip(-np.tan(phi) * np.tan(decl), -1.0, 1.0)
+    ws = np.arccos(x)
+    N = 24.0 / np.pi * ws
+    Ra = (1440.0 / np.pi) * 0.0820 * dr * (
+        ws * np.sin(phi) * np.sin(decl) + np.cos(phi) * np.cos(decl) * np.sin(ws)
+    )
+    return Ra, N
+
+
+def _eff_series(smoothed: np.ndarray, lat: float | None, energy: bool) -> np.ndarray:
+    """Effective-light daily series E(d).
+
+    energy=True (GHI source): E = measured MJ directly (already embeds geometry).
+    energy=False (sunshine):  E = clip(n/N, 0, 1) * Ra  (beam-equivalent MJ; a=0, b=1 —
+                              each measured bright hour weighted by clear-sky energy of one
+                              daylight hour at that latitude/season). No fitted coefficients.
+    """
+    if energy or lat is None:
+        return smoothed
+    Ra, N = _ra_n(lat)
+    ratio = np.clip(smoothed / np.where(N > 0.1, N, 0.1), 0.0, 1.0)
+    return ratio * Ra
+
+
+# v3 transition windows: FIXED astronomical windows (0-based DOY), NOT data-driven
+# peak->trough (which mislocates autumn to the 梅雨 trough, e.g. Tokyo DOY 172).
+_AUTUMN_WIN = (_date_to_doy("09-23"), _date_to_doy("12-22"))  # autumnal equinox -> winter solstice
+_SPRING_WIN = (_date_to_doy("12-22"), _date_to_doy("03-20"))  # winter solstice -> vernal equinox (mirror)
+
+
+def compute_metrics(values_365: np.ndarray, lat: float | None = None, energy: bool = False) -> Metrics:
+    """Compute all metrics from a 365-element array of daily normals.
+
+    `lat` + `energy` drive the v3 effective-light metrics: energy=True for the GHI
+    (solar) source (E = measured MJ), energy=False for sunshine (E = geometry-weighted
+    beam-equivalent). v1/v2 metrics are unaffected by these args.
+    """
     raw = values_365
     smoothed = _circular_ma(raw, window=15)
 
@@ -209,6 +264,29 @@ def compute_metrics(values_365: np.ndarray) -> Metrics:
     day_25a = next((i for i, v in enumerate(autumn_smoothed) if v <= level_25), len(autumn_smoothed) - 1)
     autumn_fall_days = float(max(day_25a - day_75a, 1))
 
+    # --- v3: effective-light series E(d) and fixed-window seasonal rates ---
+    eff = _eff_series(smoothed, lat, energy)
+    winter_floor_eff = float(np.mean(eff[winter_days]))
+    eff_trough_day = int(np.argmin(eff))
+    eff_range = float(np.percentile(eff, 95) - np.percentile(eff, 5))
+
+    # Autumn decline: steepest 30-day drop of E within the FIXED autumn window.
+    a0, a1 = _AUTUMN_WIN
+    autumn_drop_eff = 0.0
+    for i in range(a0, a1 - 30 + 1):
+        autumn_drop_eff = max(autumn_drop_eff, float(eff[i] - eff[i + 30]))
+    # Spring rise: steepest 30-day gain of E within the FIXED spring window (circular).
+    sp_idx = _circular_range(_SPRING_WIN[0], _SPRING_WIN[1])
+    eff_sp = eff[sp_idx]
+    spring_gain_eff = 0.0
+    if len(eff_sp) >= 31:
+        gains = eff_sp[30:] - eff_sp[:-30]
+        # floored at 0 for symmetry with autumn_drop_eff (a max() seeded at 0.0); a station
+        # that only ever loses light over its spring window has spring_rate 0, not negative.
+        spring_gain_eff = max(0.0, float(np.max(gains))) if len(gains) else 0.0
+    autumn_rate = autumn_drop_eff / eff_range if eff_range > 0 else 0.0
+    spring_rate = spring_gain_eff / eff_range if eff_range > 0 else 0.0
+
     return Metrics(
         mean_val=round(mean_val, 3),
         amplitude=round(amplitude, 4),
@@ -227,6 +305,12 @@ def compute_metrics(values_365: np.ndarray) -> Metrics:
         autumn_30d_drop_rel=round(autumn_30d_drop_rel, 4),
         trough_day=trough_day,
         peak_day=peak_day,
+        winter_floor_eff=round(winter_floor_eff, 3),
+        autumn_rate=round(autumn_rate, 4),
+        spring_rate=round(spring_rate, 4),
+        autumn_rate_abs=round(autumn_drop_eff, 3),
+        spring_rate_abs=round(spring_gain_eff, 3),
+        eff_trough_day=eff_trough_day,
     )
 
 
@@ -449,6 +533,135 @@ def v2_score(desir: dict[str, float], params: dict[str, float]) -> float:
     return max(gaps) + params["rho"] * sum(gaps)
 
 
+# ---------------------------------------------------------------------------
+# Phase 2 v3 scoring — effective-daylight sufficiency + autumn rate + acute spell.
+# Pre-registered design: docs/adr/008. Same non-compensatory augmented-Chebyshev
+# aggregation as v2, but:
+#   - master axis = winter_floor_eff (geometry-corrected; enforces 札幌<東京 by
+#     construction, demotes dim high-latitude winters for a physical reason).
+#   - autumn_rate / spring_rate computed on the effective-light series E(d) over
+#     FIXED astronomical windows, RELATIVE (/seasonal range) so a dim-summer station
+#     with little to fall from does not earn a spurious "gentle autumn" reward.
+#   - spring DE-WEIGHTED (0.3, adjustable); amplitude REMOVED (w=0, reversible lever);
+#     no unconstrained annual-brightness reward (only an optional one-sided summer cap).
+#   - winter dark-spell is a zero-weight red-flag GATE (caps d_floor), not a term, so it
+#     cannot double-count winter_floor (~77% redundant). acute (off-winter) spell is the
+#     genuinely orthogonal, live-validated 梅雨 axis (capped, season-disjoint from floor).
+# All weights are adjustable in the UI; the spouse's lived anchors are VALIDATION
+# targets (札幌<東京, December-trough, dim-summer non-reward), never fit targets.
+# ---------------------------------------------------------------------------
+V3_OBJECTIVES: list[str] = ["floor", "autumn", "spring", "excessTV", "acute", "amplitude", "summerCap"]
+
+V3_DEFAULTS: dict[str, float] = {
+    "w_floor": 1.0,
+    "w_autumn": 0.7,
+    "w_spring": 0.3,
+    "w_excessTV": 0.3,
+    "w_acute": 0.2,
+    "w_amplitude": 0.0,   # REMOVED from v2 (its desirability rose as summers dimmed); reversible
+    "w_summerCap": 0.0,   # optional one-sided mania cap on very bright summers
+    "k_floor": 0.0,       # 0 = LINEAR floor desirability (no hidden flattering of dark floors)
+    "rho": 0.1,
+    "gate_cap": 0.4,      # red winter dark-spell band caps d_floor here (non-compensatory red flag)
+}
+
+ACUTE_SPELL_CSV = OUT_DIR / "acute_spell_metrics.csv"
+
+# objective -> (Metrics field, direction). "acute" is external (daily obs), handled specially.
+_V3_FIELDS: dict[str, tuple[str, str]] = {
+    "floor": ("winter_floor_eff", "high"),
+    "autumn": ("autumn_rate", "low"),
+    "spring": ("spring_rate", "low"),
+    "excessTV": ("excess_tv", "low"),
+    "amplitude": ("amplitude", "low"),
+    "summerCap": ("summer_ceiling", "low"),
+}
+
+
+def load_acute_spell() -> dict[str, float]:
+    """Off-winter (Apr-Oct) acute dark-spell CVaR80 per stid, from real daily obs."""
+    if not ACUTE_SPELL_CSV.exists():
+        return {}
+    out: dict[str, float] = {}
+    with open(ACUTE_SPELL_CSV, encoding="utf-8") as f:
+        for r in csv.DictReader(f):
+            try:
+                out[r["stid"]] = round(float(r["acute_spell_cvar80"]), 2)
+            except (ValueError, KeyError):
+                continue
+    return out
+
+
+def compute_global_acute_anchor(acute_by_stid: dict[str, float]) -> list[float]:
+    """Source-INVARIANT 5/95 anchor for acute_spell over ALL stations that have it.
+
+    acute_spell is the same daily-observation metric regardless of which radiation
+    source a station belongs to, so its anchor must NOT be re-derived per source
+    (doing so penalised the same acute event differently by mere source coverage —
+    sunshine 154-station set vs GHI 47-station set). One global anchor fixes that.
+    """
+    av = np.array(list(acute_by_stid.values()), dtype=float)
+    return [float(np.percentile(av, 5)), float(np.percentile(av, 95))] if len(av) else [0.0, 1.0]
+
+
+def compute_v3_anchors(
+    results: list[tuple[StationMeta, Metrics]], acute_by_stid: dict[str, float],
+    acute_anchor: list[float] | None = None,
+) -> dict[str, list[float]]:
+    """[lo, hi] = 5/95 percentile anchors per v3 objective, from the FULL cleaned set.
+
+    The six effective-light axes are PER-SOURCE (sunshine beam-equiv vs measured GHI
+    are different magnitude scales). `acute_spell` is source-invariant, so it takes a
+    shared `acute_anchor` when supplied (see compute_global_acute_anchor); otherwise
+    it falls back to a per-source percentile for standalone use.
+    Same generation-frozen property as the v2 anchors (see compute_v2_anchors).
+    """
+    anchors: dict[str, list[float]] = {}
+    for obj, (field, _dir) in _V3_FIELDS.items():
+        vals = np.array([getattr(m, field) for _, m in results], dtype=float)
+        anchors[obj] = [float(np.percentile(vals, 5)), float(np.percentile(vals, 95))]
+    if acute_anchor is not None:
+        anchors["acute"] = list(acute_anchor)
+    else:
+        av = np.array([acute_by_stid[meta.stid] for meta, _ in results
+                       if acute_by_stid.get(meta.stid) is not None], dtype=float)
+        anchors["acute"] = [float(np.percentile(av, 5)), float(np.percentile(av, 95))] if len(av) else [0.0, 1.0]
+    return anchors
+
+
+def v3_desirabilities(
+    m: Metrics, acute_val: float | None, risk_band: str | None,
+    anchors: dict[str, list[float]], params: dict[str, float],
+) -> dict[str, float]:
+    """v3 desirabilities in [0,1] (1 = ideal). Floor is linear by default (k_floor=0)."""
+    desir: dict[str, float] = {}
+    for obj, (field, direction) in _V3_FIELDS.items():
+        lo, hi = anchors[obj]
+        n = _clip01((getattr(m, field) - lo) / (hi - lo)) if hi > lo else 0.0
+        if obj == "floor":
+            desir[obj] = _saturate(n, params["k_floor"])   # k_floor=0 -> linear
+        elif direction == "high":
+            desir[obj] = n
+        else:
+            desir[obj] = 1.0 - n
+    if acute_val is None:
+        desir["acute"] = 1.0   # no daily obs -> neutral (no penalty)
+    else:
+        lo, hi = anchors["acute"]
+        desir["acute"] = 1.0 - (_clip01((acute_val - lo) / (hi - lo)) if hi > lo else 0.0)
+    # Non-compensatory red-flag GATE: a RED winter dark-spell band caps the floor
+    # desirability so no gentle-transition axis can buy back a multi-week blackout.
+    if risk_band == "red":
+        desir["floor"] = min(desir["floor"], params["gate_cap"])
+    return desir
+
+
+def v3_score(desir: dict[str, float], params: dict[str, float]) -> float:
+    """Augmented weighted Chebyshev (same family as v2). Lower = better."""
+    gaps = [params[f"w_{obj}"] * (1.0 - desir[obj]) for obj in V3_OBJECTIVES]
+    return max(gaps) + params["rho"] * sum(gaps)
+
+
 def pareto_floor_vs_tv(results: list[tuple[StationMeta, Metrics]]) -> list[bool]:
     """Non-dominated flag on the headline 2-axis tradeoff: winter_floor↑ × total_variation↓."""
     pts = [(m.winter_floor, m.total_variation) for _, m in results]
@@ -500,14 +713,21 @@ def export_web_json(
         "mean_val", "amplitude", "ramp", "total_variation", "excess_tv",
         "winter_floor", "summer_ceiling", "spring_30d_gain", "autumn_30d_drop",
         "spring_rise_days", "autumn_fall_days", "trough_day", "peak_day",
+        # v3 effective-light metrics
+        "winter_floor_eff", "autumn_rate", "spring_rate", "eff_trough_day",
     ]
-    dark = load_dark_spell()  # winter dark-spell overlay (real daily obs), keyed by stid
+    dark = load_dark_spell()    # winter dark-spell overlay (real daily obs), keyed by stid
+    acute = load_acute_spell()  # off-winter (Apr-Oct) acute spell (real daily obs), keyed by stid
+    # acute_spell is source-invariant -> one global anchor shared by both sources
+    # (not re-derived per source, which leaked station-set coverage into the penalty).
+    global_acute_anchor = compute_global_acute_anchor(acute)
 
-    def build(results: list[tuple[StationMeta, Metrics]]) -> tuple[list[dict], dict]:
+    def build(results: list[tuple[StationMeta, Metrics]]) -> tuple[list[dict], dict, dict]:
         clean = [(meta, m) for meta, m in results if meta.latitude is not None]
         # Anchors from the FULL cleaned set (before livability filter) so dropping
         # non-residential stations never re-anchors the desirabilities.
         anchors = compute_v2_anchors(clean)
+        v3_anchors = compute_v3_anchors(clean, acute, acute_anchor=global_acute_anchor)
         # Candidates = livable subset; everything ranked/displayed is computed on these.
         candidates = [(meta, m) for meta, m in clean if meta.stid not in LIVABILITY_EXCLUDE]
         # v1 scores (linear z-sum) for parity with the existing UI
@@ -540,18 +760,28 @@ def export_web_json(
             row["winter_obs"] = d["winter_obs"] if d else None
             row["interann_cv"] = d["interann_cv"] if d else None
             row["risk_band"] = d["risk_band"] if d else None
+            # v3 scoring (effective-light; uses the dark-spell band as a red-flag gate)
+            acute_val = acute.get(meta.stid)
+            row["acute_spell"] = acute_val
+            desir3 = v3_desirabilities(m, acute_val, row["risk_band"], v3_anchors, V3_DEFAULTS)
+            for obj in V3_OBJECTIVES:
+                row[f"d3_{obj}"] = round(desir3[obj], 4)
+            row["score_v3"] = round(v3_score(desir3, V3_DEFAULTS), 4)
             rows.append(row)
-        return rows, anchors
+        return rows, anchors, v3_anchors
 
-    sun_rows, sun_anchors = build(sun_results)
-    solar_rows, solar_anchors = build(solar_results)
+    sun_rows, sun_anchors, sun_v3a = build(sun_results)
+    solar_rows, solar_anchors, solar_v3a = build(solar_results)
 
     payload = {
         "solar": solar_rows,
         "sunshine": sun_rows,
         "anchors": {"solar": solar_anchors, "sunshine": sun_anchors},
+        "v3_anchors": {"solar": solar_v3a, "sunshine": sun_v3a},
         "v2_defaults": V2_DEFAULTS,
         "v2_objectives": V2_OBJECTIVES,
+        "v3_defaults": V3_DEFAULTS,
+        "v3_objectives": V3_OBJECTIVES,
     }
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as f:
@@ -709,7 +939,7 @@ def main() -> None:
 
     sun_results: list[tuple[StationMeta, Metrics]] = []
     for stid, (meta, arr) in sorted(sun_data.items()):
-        m = compute_metrics(arr)
+        m = compute_metrics(arr, lat=meta.latitude, energy=False)
         sun_results.append((meta, m))
 
     # Full metric catalogue keeps EVERY station; the `livable` column marks which
@@ -727,7 +957,7 @@ def main() -> None:
 
     solar_results: list[tuple[StationMeta, Metrics]] = []
     for stid, (meta, arr) in sorted(solar_data.items()):
-        m = compute_metrics(arr)
+        m = compute_metrics(arr, lat=meta.latitude, energy=True)
         solar_results.append((meta, m))
 
     solar_csv = OUT_DIR / "station_metrics_solar.csv"
