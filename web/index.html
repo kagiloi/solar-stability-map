@@ -209,9 +209,9 @@ table.cmp thead th { font-weight: 600; }
 
     <span class="seg-label">モデル</span>
     <div class="btn-group" id="model-group">
+      <button class="btn" data-model="v1">v1 線形</button>
       <button class="btn" data-model="v2">v2 非補償</button>
       <button class="btn good active" data-model="v3">v3 実効光</button>
-      <button class="btn" data-model="v1">v1 線形</button>
     </div>
 
     <span class="spacer"></span>
@@ -927,8 +927,11 @@ function populateScatterSelects() {
     sel.innerHTML = '';
     keys.forEach(k => { const o = document.createElement('option'); o.value = k; o.textContent = META[k].label; sel.appendChild(o); });
   });
-  document.getElementById('scatter-x').value = prevX || 'amplitude';
-  document.getElementById('scatter-y').value = prevY || 'winter_floor';
+  // v3 default axes = the two heaviest v3 objectives (winter_floor_eff w=1.0 × autumn_rate
+  // w=0.7) = the spouse's two timescales (chronic winter light × autumn-decline delta).
+  // "明るい冬 × 緩やかな秋" lands bottom-right. amplitude is no longer a v3 axis (w=0).
+  document.getElementById('scatter-x').value = prevX || 'winter_floor_eff';
+  document.getElementById('scatter-y').value = prevY || 'autumn_rate';
   document.getElementById('scatter-color').value = prevC || 'overall';
   if (!scatterInitialized) {
     ['scatter-x', 'scatter-y', 'scatter-color'].forEach(id =>
