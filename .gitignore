@@ -5,3 +5,6 @@ __pycache__/
 
 # NEDO METPV-20 raw CSVs — redistribution license unconfirmed; keep derived metrics only
 data/nedo/
+
+# JMA daily obs raw cache (regenerable via crawl; keep derived metrics only)
+data/jma_daily/
