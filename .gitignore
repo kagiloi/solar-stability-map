@@ -8,3 +8,6 @@ data/nedo/
 
 # JMA daily obs raw cache (regenerable via crawl; keep derived metrics only)
 data/jma_daily/
+
+# playwright-cli smoke-test artifacts
+.playwright-cli/
