@@ -78,7 +78,7 @@ body {
 .formula-preview .fw-zero { color: #666; }
 
 /* ---------- Main row: map + right pane ---------- */
-#main { flex: 1 1 auto; display: flex; min-height: 0; position: relative; }
+#main { flex: 1 1 auto; display: flex; min-height: 0; position: relative; --pane-w: 460px; }
 #map { flex: 1 1 auto; min-width: 0; height: 100%; background: #0a0c10; }
 .map-overlay {
   position: absolute; top: 10px; left: 56px; z-index: 500;
@@ -93,7 +93,7 @@ body {
 
 /* Right pane */
 #rightpane {
-  flex: 0 0 460px; width: 460px; background: var(--surface2); border-left: 1px solid var(--border);
+  flex: 0 0 var(--pane-w); width: var(--pane-w); background: var(--surface2); border-left: 1px solid var(--border);
   display: flex; flex-direction: column; min-height: 0; transition: flex-basis 0.18s, width 0.18s;
 }
 #rightpane.collapsed { flex-basis: 0; width: 0; border-left: none; overflow: hidden; }
@@ -108,15 +108,18 @@ body {
 .pane-panel { display: none; }
 .pane-panel.active { display: block; }
 
-/* Pane toggle handle on the divider */
+/* Pane toggle handle on the divider — click = show/hide, drag = resize */
 #pane-toggle {
-  position: absolute; top: 50%; right: 460px; transform: translateY(-50%);
+  position: absolute; top: 50%; right: var(--pane-w); transform: translateY(-50%);
   z-index: 600; background: var(--surface); border: 1px solid var(--border); border-right: none;
-  color: var(--text-dim); cursor: pointer; padding: 14px 5px; border-radius: 8px 0 0 8px;
-  font-size: 0.8rem; transition: right 0.18s;
+  color: var(--text-dim); cursor: ew-resize; padding: 18px 5px; border-radius: 8px 0 0 8px;
+  font-size: 0.8rem; transition: right 0.18s; touch-action: none; user-select: none;
 }
 #pane-toggle:hover { color: var(--accent); }
 #rightpane.collapsed + #pane-toggle, #main.pane-collapsed #pane-toggle { right: 0; }
+/* during a drag: kill transitions so the edge tracks the cursor, suppress text selection */
+#main.resizing { cursor: ew-resize; user-select: none; }
+#main.resizing #rightpane, #main.resizing #pane-toggle { transition: none; }
 
 /* ---------- Scatter / Ranking ---------- */
 .pane-controls { display: flex; gap: 8px; margin-bottom: 8px; align-items: center; flex-wrap: wrap; font-size: 0.78rem; }
@@ -126,6 +129,20 @@ body {
   padding: 4px 6px; border-radius: 5px; font-size: 0.78rem; max-width: 150px;
 }
 #scatter-plot { height: 420px; }
+
+/* Scatter: quadrant reading-guide + selected-point readout (fill the space below the plot) */
+#scatter-guide { margin: 8px 0 4px; font-size: 0.74rem; }
+.sg-head { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; color: var(--text-dim); margin-bottom: 5px; }
+.sg-head b { color: var(--text); font-weight: 600; }
+.sg-corr { font-family: 'SF Mono','Menlo',monospace; white-space: nowrap; }
+.sg-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 4px; }
+.sg-cell { border: 1px solid var(--border); border-radius: 6px; padding: 5px 8px; background: var(--surface); line-height: 1.45; }
+.sg-cell.ideal { border-color: var(--good); background: rgba(76,175,130,0.08); }
+.sg-cell.avoid { border-color: rgba(224,85,85,0.5); }
+.sg-pos { color: var(--text-dim); font-size: 0.7rem; margin-right: 3px; }
+.sg-cond { color: var(--text); }
+#scatter-readout { margin-top: 10px; }
+#scatter-readout table.cmp td:first-child, #scatter-readout table.cmp th:first-child { color: var(--text); }
 
 table.rank { width: 100%; border-collapse: collapse; font-size: 0.76rem; }
 table.rank th, table.rank td { padding: 5px 6px; text-align: right; white-space: nowrap; border-bottom: 1px solid var(--border); }
@@ -276,9 +293,12 @@ table.cmp thead th { font-weight: 600; }
           <label>Y:</label><select id="scatter-y"></select>
           <div style="flex-basis:100%;height:0"></div>
           <label>色:</label><select id="scatter-color"></select>
+          <label style="margin-left:auto;white-space:nowrap;"><input type="checkbox" id="scatter-selonly"> 選択地点のみ</label>
         </div>
         <div id="scatter-plot"></div>
         <p class="cmp-sub">点をクリックで選択。★=Pareto最適(冬明るさ×総変動の最前線)。</p>
+        <div id="scatter-guide"></div>
+        <div id="scatter-readout"></div>
       </div>
       <!-- RANKING -->
       <div id="pp-rank" class="pane-panel">
@@ -301,7 +321,7 @@ table.cmp thead th { font-weight: 600; }
   <span class="tray-label">選択地点:</span>
   <span id="tray-chips"><span class="cmp-na" style="font-size:0.78rem;">なし — 地図/散布図/表でクリック</span></span>
   <span class="spacer"></span>
-  <button class="btn" id="sel-demo" style="font-size:0.74rem;padding:3px 8px;">例: 松本/帯広/金沢を選択</button>
+  <button class="btn" id="sel-demo" style="font-size:0.74rem;padding:3px 8px;">例: 札幌/松本/東京/那覇を選択</button>
   <button class="btn" id="sel-clear" style="font-size:0.74rem;padding:3px 8px;">クリア</button>
 </div>
 
@@ -768,22 +788,93 @@ document.querySelectorAll('.pane-tab').forEach(tab => {
   });
 });
 
-// Pane collapse
-document.getElementById('pane-toggle').addEventListener('click', () => {
+// Pane collapse + drag-to-resize on the same handle:
+//   click (move < slop) = show/hide (unchanged) · drag = resize the right pane.
+function togglePane() {
   const pane = document.getElementById('rightpane');
   const main = document.getElementById('main');
   pane.classList.toggle('collapsed');
   main.classList.toggle('pane-collapsed');
   document.getElementById('pane-toggle').textContent = pane.classList.contains('collapsed') ? '◀' : '▶';
   setTimeout(() => { map.invalidateSize(); resizeScatter(); renderCompare(); }, 200);
-});
+}
+(() => {
+  const toggle = document.getElementById('pane-toggle');
+  const pane = document.getElementById('rightpane');
+  const main = document.getElementById('main');
+  const MINW = 300, MAP_MIN = 360, CLICK_SLOP = 5;   // keep ≥360px for the map
+  const maxW = () => Math.max(MINW, window.innerWidth - MAP_MIN);
+  function setPaneWidth(w) {
+    w = Math.max(MINW, Math.min(maxW(), w));
+    main.style.setProperty('--pane-w', w + 'px');
+    return w;
+  }
+  // restore a persisted width (clamped) — guard storage: it throws in private mode / blocked
+  // cookies, and this runs at page-init before the map/data load, so an unguarded throw would
+  // abort the rest of the inline script.
+  let saved = NaN;
+  try { saved = parseInt(localStorage.getItem('paneWidth') || '', 10); } catch (_) {}
+  if (!isNaN(saved)) setPaneWidth(saved);
+
+  let startX = 0, startW = 0, dragging = false, pid = null, collapsedAtStart = false, raf = null;
+  function liveRelayout() {           // throttle the (heavier) plot relayouts to one per frame
+    if (raf) return;
+    raf = requestAnimationFrame(() => {
+      raf = null;
+      map.invalidateSize(); resizeScatter();
+      ['cmp-annual', 'cmp-dark', 'cmp-radar', 'cmp-elev', 'cmp-daylight'].forEach(id => {
+        const el = document.getElementById(id);
+        if (el && el.data) { try { Plotly.Plots.resize(id); } catch (_) {} }
+      });
+    });
+  }
+  toggle.addEventListener('pointerdown', e => {
+    if (pid !== null) return;                        // ignore a second pointer while one is active
+    startX = e.clientX;
+    startW = pane.getBoundingClientRect().width;
+    dragging = false;
+    collapsedAtStart = pane.classList.contains('collapsed');
+    pid = e.pointerId;
+    toggle.setPointerCapture(pid);
+    if (!collapsedAtStart) main.classList.add('resizing');
+    e.preventDefault();
+  });
+  toggle.addEventListener('pointermove', e => {
+    if (pid === null || e.pointerId !== pid || collapsedAtStart) return;   // collapsed handle acts as expand-only
+    const dx = startX - e.clientX;                  // drag left widens (pane hugs the right edge)
+    if (!dragging && Math.abs(dx) < CLICK_SLOP) return;
+    dragging = true;
+    setPaneWidth(startW + dx);
+    liveRelayout();
+  });
+  function endDrag(e) {
+    if (pid === null || e.pointerId !== pid) return;
+    try { toggle.releasePointerCapture(pid); } catch (_) {}
+    pid = null;
+    main.classList.remove('resizing');
+    if (dragging) {
+      const w = Math.round(pane.getBoundingClientRect().width);
+      try { localStorage.setItem('paneWidth', w); } catch (_) {}
+      map.invalidateSize(); resizeScatter(); renderCompare();
+    } else {
+      togglePane();                                 // moved < slop → it was a click
+    }
+  }
+  toggle.addEventListener('pointerup', endDrag);
+  toggle.addEventListener('pointercancel', endDrag);
+  // keep the pane inside the viewport when the window shrinks
+  window.addEventListener('resize', () => {
+    if (!pane.classList.contains('collapsed')) setPaneWidth(pane.getBoundingClientRect().width);
+  });
+})();
 
 // Selection tray buttons
 document.getElementById('sel-clear').addEventListener('click', () => { SELECTED = []; onSelectionChanged(); });
 document.getElementById('sel-demo').addEventListener('click', () => {
-  // 松本/金沢 only exist in the 日照時間 source → switch there so all three show
+  // 松本 only exists in the 日照時間 source → switch there so all four show (a latitude ladder:
+  // 札幌→松本→東京→那覇)
   if (currentSource !== 'sunshine') document.querySelector('#source-group .btn[data-source=sunshine]').click();
-  const want = ['s47618', 's47417', 's47605']; // 松本 / 帯広 / 金沢
+  const want = ['s47412', 's47618', 's47662', 's47936']; // 札幌 / 松本 / 東京 / 那覇
   SELECTED = want.filter(stid => DATA.some(d => d.stid === stid));
   onSelectionChanged();
 });
@@ -937,6 +1028,7 @@ function populateScatterSelects() {
   if (!scatterInitialized) {
     ['scatter-x', 'scatter-y', 'scatter-color'].forEach(id =>
       document.getElementById(id).addEventListener('change', renderScatter));
+    document.getElementById('scatter-selonly').addEventListener('change', renderScatter);
     scatterInitialized = true;
   }
 }
@@ -946,24 +1038,36 @@ function renderScatter() {
   const yKey = document.getElementById('scatter-y').value;
   const cKey = document.getElementById('scatter-color').value;
   const xMeta = META[xKey], yMeta = META[yKey], cMeta = META[cKey];
-  const filtered = DATA.filter(d => d.lat != null);
+  const all = DATA.filter(d => d.lat != null);
+  const selOnly = document.getElementById('scatter-selonly').checked;
+  const isSel = d => SELECTED.includes(d.stid);
+  // color bounds over the full field so the colorbar stays fixed regardless of mode
+  const cvals = all.map(d => d[cKey]).filter(v => v != null && !isNaN(v));
+  const cmin = cvals.length ? Math.min(...cvals) : undefined;
+  const cmax = cvals.length ? Math.max(...cvals) : undefined;
 
+  // "選択地点のみ": keep ALL points in the trace (so the axis scale is unchanged) but make
+  // non-selected markers invisible — the hidden points stay hoverable/clickable, and only the
+  // selected points show a marker + name label (in both modes).
   const baseTrace = {
-    x: filtered.map(d => d[xKey]), y: filtered.map(d => d[yKey]),
-    customdata: filtered.map(d => d.stid),
-    text: filtered.map(d => `${d.name} (#${d.rank})<br>Score: ${d.overall.toFixed(2)}<br>${xMeta.label}: ${xMeta.fmt(d[xKey])}<br>${yMeta.label}: ${yMeta.fmt(d[yKey])}`),
-    hoverinfo: 'text', mode: 'markers+text',
+    x: all.map(d => d[xKey]), y: all.map(d => d[yKey]),
+    customdata: all.map(d => d.stid),
+    // labels use `text` (not `texttemplate` — its array doesn't reliably re-render on Plotly.react,
+    // so newly-selected points showed a marker but no name); rich tooltip moves to `hovertext`.
+    text: all.map(d => isSel(d) ? d.name : ''),
+    hovertext: all.map(d => `${d.name} (#${d.rank})<br>Score: ${d.overall.toFixed(2)}<br>${xMeta.label}: ${xMeta.fmt(d[xKey])}<br>${yMeta.label}: ${yMeta.fmt(d[yKey])}`),
+    hoverinfo: 'text', mode: 'markers+text', cliponaxis: false,  // don't clip 'top center' name labels at the axis edge
     textposition: 'top center', textfont: { size: 8, color: '#8a8d9a' },
-    texttemplate: filtered.map(d => SELECTED.includes(d.stid) ? d.name : ''),
     marker: {
-      size: filtered.map(d => SELECTED.includes(d.stid) ? 15 : (d.pareto ? 11 : 8)),
-      symbol: filtered.map(d => d.pareto ? 'star' : 'circle'),
-      color: filtered.map(d => d[cKey]),
+      size: all.map(d => isSel(d) ? 15 : (d.pareto ? 11 : 8)),
+      opacity: all.map(d => (selOnly && SELECTED.length) ? (isSel(d) ? 0.95 : 0) : 0.85),  // empty selection → show all (no blank plot)
+      symbol: all.map(d => d.pareto ? 'star' : 'circle'),
+      color: all.map(d => d[cKey]), cmin, cmax,
       colorscale: cMeta.lower_is_good ? [[0,'#4caf82'],[0.5,'#e0c040'],[1,'#e05555']] : [[0,'#e05555'],[0.5,'#e0c040'],[1,'#4caf82']],
       colorbar: { title: { text: cMeta.label, font: { color: '#8a8d9a', size: 10 } }, tickfont: { color: '#8a8d9a', size: 9 }, thickness: 10 },
       line: {
-        width: filtered.map(d => SELECTED.includes(d.stid) ? 3 : (d.pareto ? 1.2 : 0.5)),
-        color: filtered.map(d => { const c = selColorOf(d.stid); return c ? c : (d.pareto ? '#fff' : '#333'); }),
+        width: all.map(d => isSel(d) ? 3 : (d.pareto ? 1.2 : 0.5)),
+        color: all.map(d => { const c = selColorOf(d.stid); return c ? c : (d.pareto ? '#fff' : '#333'); }),
       },
     },
     type: 'scatter',
@@ -975,13 +1079,86 @@ function renderScatter() {
     font: { color: '#e0e0e6' }, margin: { l: 50, r: 10, t: 10, b: 44 }, hovermode: 'closest', showlegend: false,
   };
   Plotly.react('scatter-plot', [baseTrace], layout, { responsive: true, displayModeBar: false });
+  // Plotly.react can leave the scatter text layer one render stale (a newly-selected point shows its
+  // marker but not its name); force the text + marker-opacity layers to sync to the current state.
+  Plotly.restyle('scatter-plot', { text: [baseTrace.text], 'marker.opacity': [baseTrace.marker.opacity] });
   const gd = document.getElementById('scatter-plot');
   if (!gd._wbBound) {
     gd._wbBound = true;
     gd.on('plotly_click', e => { const stid = e.points[0].customdata; if (stid) toggleSelect(stid); });
   }
+  renderScatterGuide();
+  renderScatterReadout();
 }
 function resizeScatter() { try { Plotly.Plots.resize('scatter-plot'); } catch (e) {} }
+
+// strip the "(高=良)" / "[v3]" qualifiers for compact inline labels
+function shortLabel(s) { return String(s).replace(/\s*[\(（\[].*$/, '').trim(); }
+function pearson(xs, ys) {
+  const n = xs.length;
+  if (n < 3) return null;
+  let sx = 0, sy = 0, sxx = 0, syy = 0, sxy = 0;
+  for (let i = 0; i < n; i++) { const x = xs[i], y = ys[i]; sx += x; sy += y; sxx += x * x; syy += y * y; sxy += x * y; }
+  const cov = sxy - sx * sy / n, vx = sxx - sx * sx / n, vy = syy - sy * sy / n;
+  return (vx > 0 && vy > 0) ? cov / Math.sqrt(vx * vy) : null;
+}
+// quadrant reading-guide: label each corner of the current X/Y plot good/neutral/avoid
+// from each axis's own good-direction, plus the X–Y correlation (axis-redundancy check).
+function renderScatterGuide() {
+  const host = document.getElementById('scatter-guide');
+  if (!host) return;
+  const META = getMetricMeta();
+  const xKey = document.getElementById('scatter-x').value, yKey = document.getElementById('scatter-y').value;
+  const xMeta = META[xKey], yMeta = META[yKey];
+  const xn = shortLabel(xMeta.label), yn = shortLabel(yMeta.label);
+  const xGoodHigh = !xMeta.lower_is_good, yGoodHigh = !yMeta.lower_is_good;   // which end is "good"
+  const pts = DATA.filter(d => d.lat != null && d[xKey] != null && !isNaN(d[xKey]) && d[yKey] != null && !isNaN(d[yKey]));
+  const r = pearson(pts.map(d => d[xKey]), pts.map(d => d[yKey]));
+  let corr;
+  if (r == null) { corr = '相関 計算不可'; }
+  else {
+    const a = Math.abs(r), sign = r > 0 ? '正' : '負';
+    const strength = a < 0.2 ? 'ほぼ無相関' : a < 0.4 ? '弱い' : a < 0.7 ? '中程度' : '強い';
+    const tag = a < 0.2 ? 'ほぼ無相関' : strength + 'の' + sign + '相関';
+    const note = a >= 0.7 ? ' · 軸が冗長気味' : a < 0.2 ? ' · ほぼ独立' : '';
+    corr = `相関 r = ${r.toFixed(2)} (n=${pts.length} · ${tag}${note})`;
+  }
+  // corners in grid order: 左上, 右上, 左下, 右下  (top row = high Y, bottom row = low Y)
+  const corners = [
+    { pos: '左上', xHigh: false, yHigh: true },
+    { pos: '右上', xHigh: true,  yHigh: true },
+    { pos: '左下', xHigh: false, yHigh: false },
+    { pos: '右下', xHigh: true,  yHigh: false },
+  ];
+  const cells = corners.map(c => {
+    const good = (c.xHigh === xGoodHigh ? 1 : 0) + (c.yHigh === yGoodHigh ? 1 : 0);
+    const mark = good === 2 ? '<span class="band-green">◎</span> 理想'
+               : good === 1 ? '<span class="band-yellow">△</span> 一長一短'
+               : '<span class="band-red">✗</span> 回避';
+    const cls = good === 2 ? 'sg-cell ideal' : good === 0 ? 'sg-cell avoid' : 'sg-cell';
+    const cond = `${xn}:${c.xHigh ? '高' : '低'} · ${yn}:${c.yHigh ? '高' : '低'}`;
+    return `<div class="${cls}"><span class="sg-pos">${c.pos}</span>${mark}<br><span class="sg-cond">${cond}</span></div>`;
+  }).join('');
+  host.innerHTML = `<div class="sg-head"><b>散布図の読み方</b><span class="sg-corr">${corr}</span></div><div class="sg-grid">${cells}</div>`;
+}
+// numeric readout of exactly what's plotted (X/Y/色/順位) for the selected stations
+function renderScatterReadout() {
+  const host = document.getElementById('scatter-readout');
+  if (!host) return;
+  const rows = compareSelectedRows();
+  if (!rows.length) {
+    host.innerHTML = '<p class="cmp-sub">地点を選択すると、ここにX/Y/色/順位の数値が出ます。</p>';
+    return;
+  }
+  const META = getMetricMeta();
+  const xKey = document.getElementById('scatter-x').value, yKey = document.getElementById('scatter-y').value, cKey = document.getElementById('scatter-color').value;
+  const cell = (d, key) => { const v = d[key]; return (v == null || isNaN(v)) ? '<span class="cmp-na">-</span>' : META[key].fmt(v); };
+  const head = `<tr><th>選択地点</th><th>X:${shortLabel(META[xKey].label)}</th><th>Y:${shortLabel(META[yKey].label)}</th><th>色:${shortLabel(META[cKey].label)}</th><th>#</th></tr>`;
+  const body = rows.map(d =>
+    `<tr><td><span class="dot" style="background:${selColor(SELECTED.indexOf(d.stid))}"></span>${d.name}</td>` +
+    `<td>${cell(d, xKey)}</td><td>${cell(d, yKey)}</td><td>${cell(d, cKey)}</td><td>${d.rank}</td></tr>`).join('');
+  host.innerHTML = `<table class="cmp"><thead>${head}</thead><tbody>${body}</tbody></table>`;
+}
 
 // ============================================================
 //  Ranking table
@@ -1078,6 +1255,27 @@ const MONTH_DOY = [0, 31, 59, 90, 120, 151, 181, 212, 243, 273, 304, 334];
 const MONTH_LBL = ['1','2','3','4','5','6','7','8','9','10','11','12'];
 const PLOT_BG = { paper_bgcolor: '#0f1117', plot_bgcolor: '#0f1117', font: { color: '#e0e0e6', size: 10 } };
 const PLOT_CFG = { responsive: true, displayModeBar: false };
+
+// --- "今" (now) indicator: a vertical marker at today's date (browser-local, real-time) ---
+function nowDoyIndex() {            // 0-based index on the data's fixed 365-day calendar (no Feb 29)
+  const now = new Date();
+  // month-offset table (= the chart's MONTH_DOY tick offsets), so leap-year Feb 29 maps onto
+  // Mar 1's slot and the index never drifts or overflows past 364 (vs counting elapsed days).
+  return MONTH_DOY[now.getMonth()] + (now.getDate() - 1);
+}
+function nowMMDD() {                // 'MM-DD' to locate today within the winter-day axis
+  const now = new Date();
+  return String(now.getMonth() + 1).padStart(2, '0') + '-' + String(now.getDate()).padStart(2, '0');
+}
+function nowLineShape(x) {          // dotted vertical line spanning the plot at x (data coord)
+  return { type: 'line', xref: 'x', yref: 'paper', x0: x, x1: x, y0: 0, y1: 1,
+           line: { color: 'rgba(230,230,236,0.5)', width: 1.5, dash: 'dot' }, layer: 'above' };
+}
+function nowLabelAnn(x) {           // small "今" tag at the top of that line
+  return { x, y: 1, xref: 'x', yref: 'paper', text: '今', showarrow: false,
+           xanchor: 'center', yanchor: 'top', font: { color: '#e6e6ec', size: 9 },
+           bgcolor: 'rgba(15,17,23,0.55)' };
+}
 
 let compareDirty = true;
 function renderCompareLive() {
@@ -1182,10 +1380,13 @@ function drawAnnual() {
     const x = arr.map((_, d) => d);
     traces.push(Object.assign(seriesTrace(stid, smoothCircular(arr, 15), (rowByStid(stid)||{}).name || stid, i), { x }));
   });
+  const nx = nowDoyIndex();
+  const anns = missing.length ? [{ text: `${missing.join(', ')}: この源の平年値なし`, showarrow: false, x: 0, y: 1, xref: 'paper', yref: 'paper', font: { color: '#e0a030', size: 9 }, xanchor: 'left' }] : [];
+  anns.push(nowLabelAnn(nx));
   const layout = Object.assign({
     xaxis: AXIS_MONTH, yaxis: { title: { text: SOURCE_META[currentSource].unit, font: { size: 9 } }, color: '#8a8d9a', gridcolor: '#1f2230' },
     margin: { l: 44, r: 8, t: 26, b: 24 }, legend: LEGEND, showlegend: true,
-    annotations: missing.length ? [{ text: `${missing.join(', ')}: この源の平年値なし`, showarrow: false, x: 0, y: 1, xref: 'paper', yref: 'paper', font: { color: '#e0a030', size: 9 }, xanchor: 'left' }] : [],
+    shapes: [nowLineShape(nx)], annotations: anns,
   }, PLOT_BG);
   Plotly.react('cmp-annual', traces, layout, PLOT_CFG);
 }
@@ -1205,10 +1406,12 @@ function drawDark() {
     traces.push(seriesTrace(stid, smoothEdge(arr.map(v => v == null ? null : v * 100), 7), (rowByStid(stid)||{}).name || stid, i,
       { x: arr.map((_, d) => d), connectgaps: true }));
   });
+  const di = wd.indexOf(nowMMDD());   // today's index in the winter axis, or -1 if out of range
   const layout = Object.assign({
     xaxis: { tickmode: 'array', tickvals: tvals, ticktext: ttext, color: '#8a8d9a', gridcolor: '#1f2230' },
     yaxis: { title: { text: 'P(日照<2h) %', font: { size: 9 } }, color: '#8a8d9a', gridcolor: '#1f2230', range: [0, 100] },
     margin: { l: 44, r: 8, t: 8, b: 24 }, legend: LEGEND, showlegend: true,
+    shapes: di >= 0 ? [nowLineShape(di)] : [], annotations: di >= 0 ? [nowLabelAnn(di)] : [],
   }, PLOT_BG);
   Plotly.react('cmp-dark', traces, layout, PLOT_CFG);
 }
@@ -1245,13 +1448,16 @@ function drawSolarGeometry() {
     elevTraces.push(seriesTrace(stid, doys.map(k => +noonElevation(d.lat, k + 1).toFixed(2)), nm, i, { x: doys }));
     dayTraces.push(seriesTrace(stid, doys.map(k => +daylightHours(d.lat, k + 1).toFixed(3)), nm, i, { x: doys }));
   });
+  const nx = nowDoyIndex();
   Plotly.react('cmp-elev', elevTraces, Object.assign({
     xaxis: AXIS_MONTH, yaxis: { title: { text: '度', font: { size: 9 } }, color: '#8a8d9a', gridcolor: '#1f2230' },
     margin: { l: 40, r: 8, t: 8, b: 24 }, legend: LEGEND, showlegend: true,
+    shapes: [nowLineShape(nx)], annotations: [nowLabelAnn(nx)],
   }, PLOT_BG), PLOT_CFG);
   Plotly.react('cmp-daylight', dayTraces, Object.assign({
     xaxis: AXIS_MONTH, yaxis: { title: { text: '時間', font: { size: 9 } }, color: '#8a8d9a', gridcolor: '#1f2230' },
     margin: { l: 40, r: 8, t: 8, b: 24 }, legend: LEGEND, showlegend: true,
+    shapes: [nowLineShape(nx)], annotations: [nowLabelAnn(nx)],
   }, PLOT_BG), PLOT_CFG);
 }
 
